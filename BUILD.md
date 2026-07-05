@@ -79,6 +79,9 @@ Everything else works without it — only the Stream Details fields stay blank.
 - **"Failed to execute script" / blank crash on launch** — build once with the
   console visible to see the real error: temporarily change `--windowed` to
   `--console`, rebuild, run from a command prompt, read the traceback.
+- **Want the debug/trace output?** It's off by default (printing to the console
+  on every action makes the UI sluggish). Turn it on for a session with
+  `set PARAGON_DEBUG=1` before launching from a command prompt.
 - **App starts but has no theme / wrong colors** — the
   `--collect-all customtkinter` flag is missing or PyInstaller is out of date
   (`pip install -U pyinstaller`).

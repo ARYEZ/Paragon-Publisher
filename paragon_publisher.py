@@ -41,6 +41,19 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
+# Debug logging is OFF by default. The app scatters a couple hundred print()
+# calls for tracing, some inside per-item loops; writing them to the console on
+# every operation (console I/O is synchronous and slow, especially on Windows)
+# makes the whole UI feel a beat behind. Shadow the builtin print() for this
+# module with a version that is a no-op unless PARAGON_DEBUG is set, so normal
+# runs pay no console cost. Run with  set PARAGON_DEBUG=1  to see the tracing.
+import builtins as _builtins
+DEBUG = os.environ.get('PARAGON_DEBUG', '').strip().lower() not in ('', '0', 'false', 'no', 'off')
+
+def print(*args, **kwargs):  # noqa: A001 - intentional module-level shadow
+    if DEBUG:
+        _builtins.print(*args, **kwargs)
+
 # Optional dependencies - graceful fallback
 try:
     from PIL import Image, ImageTk
@@ -160,10 +173,21 @@ def enable_mousewheel_scrolling(root):
         except:
             pass
         
-        # Bind when entering the scrollable area
+        # Bind when entering the scrollable area. Re-walking the whole widget
+        # subtree on every <Enter> is expensive for big lists, so only re-bind
+        # when the child count changed since the last walk (the list is static
+        # while you hover, which is the common case).
+        self._mw_bound_count = -1
+
         def _on_enter(event):
-            _bind_to_all_children(self)
-        
+            try:
+                count = len(self.winfo_children())
+            except Exception:
+                count = -1
+            if count != self._mw_bound_count:
+                self._mw_bound_count = count
+                _bind_to_all_children(self)
+
         self.bind("<Enter>", _on_enter)
     
     ctk.CTkScrollableFrame.__init__ = patched_init
