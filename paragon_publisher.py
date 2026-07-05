@@ -13960,12 +13960,27 @@ def open_child_window(child, launcher):
     if child is None or launcher is None:
         return child
 
+    # Remember how the launcher was displayed so we can bring it back the same
+    # way. These windows open maximized ('zoomed'); deiconify() alone drops
+    # them back to their plain windowed geometry, so we must re-assert it.
+    try:
+        prior_state = launcher.state()
+    except Exception:
+        prior_state = None
+
     try:
         launcher.withdraw()
     except Exception:
         pass
 
     state = {'restored': False}
+
+    def _remaximize():
+        try:
+            if launcher.winfo_exists():
+                launcher.state('zoomed')
+        except Exception:
+            pass
 
     def restore():
         if state['restored']:
@@ -13974,6 +13989,14 @@ def open_child_window(child, launcher):
         try:
             if launcher.winfo_exists():
                 launcher.deiconify()
+                # Re-maximize unless it was explicitly a normal window.
+                if prior_state != 'normal':
+                    _remaximize()
+                    # Some window managers need a beat before 'zoomed' sticks.
+                    try:
+                        launcher.after(10, _remaximize)
+                    except Exception:
+                        pass
                 launcher.lift()
                 launcher.focus_force()
         except Exception:
