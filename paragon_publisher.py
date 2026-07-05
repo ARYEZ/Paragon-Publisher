@@ -9011,7 +9011,7 @@ class MediaFlowWindow(ctk.CTkToplevel):
         self.configure(fg_color=ParagonTheme.BG_DARK)
         self.geometry(self.default_geometry)
         self.minsize(*self.min_size)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
+        self._ensure_maximized()
 
         # The single container that every view is packed into.
         self.container = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
@@ -9027,6 +9027,30 @@ class MediaFlowWindow(ctk.CTkToplevel):
             self.open_editor(editor_files)
         else:
             self.show_library(library_path)
+
+    def _ensure_maximized(self):
+        """Force the window to the maximized state.
+
+        Re-asserted every time a view is shown: a view's heavy __init__
+        (ffprobe, artwork downloads) can emit later configure events that
+        knock a just-set 'zoomed' back to the plain windowed geometry on
+        Windows, so a single maximize at creation is not reliable. Scheduled
+        with a short delay so it runs once the window is idle, and once more
+        as a belt-and-suspenders retry."""
+        def _apply():
+            try:
+                if self.winfo_exists() and self.state() != 'zoomed':
+                    self.state('zoomed')
+            except Exception:
+                try:
+                    self.attributes('-fullscreen', True)
+                except Exception:
+                    pass
+        try:
+            self.after(10, _apply)
+            self.after(60, _apply)
+        except Exception:
+            pass
 
     def _toggle_maximize(self):
         try:
@@ -9048,6 +9072,7 @@ class MediaFlowWindow(ctk.CTkToplevel):
         self._view_stack.append({'view': view, 'title': title})
         view.pack(fill="both", expand=True)
         self.title(title)
+        self._ensure_maximized()
 
     def go_back(self):
         """Return to the previous view; close the window if at the root view."""
@@ -9062,6 +9087,7 @@ class MediaFlowWindow(ctk.CTkToplevel):
         prev = self._view_stack[-1]
         prev['view'].pack(fill="both", expand=True)
         self.title(prev['title'])
+        self._ensure_maximized()
 
     # --- subclass hooks -----------------------------------------------------
     def make_library_view(self, container, library_path):
