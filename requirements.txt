@@ -1,0 +1,7 @@
+# Runtime dependencies for Paragon Publisher
+# Install with:  python -m pip install -r requirements.txt
+
+customtkinter        # GUI toolkit (required)
+Pillow               # image / EXIF handling (poster, fanart, thumbnails)
+mutagen              # audio tag reading/writing (ID3, FLAC, MP4, OGG)
+tkinterdnd2          # drag-and-drop support (optional but recommended)

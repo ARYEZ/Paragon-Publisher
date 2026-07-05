@@ -30,6 +30,16 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Callable, Dict, Any
 from enum import Enum
 import threading
+import sys
+
+# When bundled as a windowed .exe (PyInstaller --windowed / --noconsole) the
+# process has no console, so Windows leaves sys.stdout / sys.stderr as None.
+# This app prints debug output in many places, and print()/sys.stdout.flush()
+# on a None stream raises and would crash the GUI. Route them to a null sink.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
 
 # Optional dependencies - graceful fallback
 try:
