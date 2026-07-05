@@ -12696,27 +12696,29 @@ class TVEditorDialog(ctk.CTkToplevel):
         if self.existing_artwork.get('landscape'):
             load_local_image(self.existing_artwork['landscape'], self.landscape_label, (260, 90), '_landscape_photo', 'landscape')
     
-    def _extract_stream_info(self):
-        """Extract stream info from video file using ffprobe"""
-        if not self.current_file:
-            return
-        
-        self.stream_info = {
+    def _probe_stream_info(self, path):
+        """Run ffprobe on `path` and return a stream-info dict.
+
+        Returns the empty skeleton (all fields blank) if `path` is missing or
+        ffprobe is unavailable/fails, so callers always get a usable dict."""
+        info = {
             'video': {'codec': '', 'resolution': '', 'aspect': '', 'scantype': '', 'duration': ''},
             'audio': [],
             'subtitles': []
         }
-        
+        if not path:
+            return info
+
         try:
             import subprocess
-            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', self.current_file]
+            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 data = json.loads(result.stdout)
-                
+
                 for stream in data.get('streams', []):
                     if stream.get('codec_type') == 'video':
-                        self.stream_info['video'] = {
+                        info['video'] = {
                             'codec': stream.get('codec_name', '').upper(),
                             'resolution': f"{stream.get('width', '')} x {stream.get('height', '')}",
                             'aspect': str(round(stream.get('width', 0) / stream.get('height', 1), 3)) if stream.get('height') else '',
@@ -12727,18 +12729,26 @@ class TVEditorDialog(ctk.CTkToplevel):
                         lang = stream.get('tags', {}).get('language', 'und')
                         codec = stream.get('codec_name', '').upper()
                         channels = stream.get('channels', 2)
-                        self.stream_info['audio'].append({'language': lang, 'codec': codec, 'channels': channels})
+                        info['audio'].append({'language': lang, 'codec': codec, 'channels': channels})
                     elif stream.get('codec_type') == 'subtitle':
                         lang = stream.get('tags', {}).get('language', 'und')
-                        self.stream_info['subtitles'].append({'language': lang})
-                
+                        info['subtitles'].append({'language': lang})
+
                 duration_secs = float(data.get('format', {}).get('duration', 0))
                 hours = int(duration_secs // 3600)
                 mins = int((duration_secs % 3600) // 60)
                 secs = int(duration_secs % 60)
-                self.stream_info['video']['duration'] = f"{hours:02d}:{mins:02d}:{secs:02d}"
+                info['video']['duration'] = f"{hours:02d}:{mins:02d}:{secs:02d}"
         except:
             pass
+
+        return info
+
+    def _extract_stream_info(self):
+        """Extract stream info from the current video file using ffprobe"""
+        if not self.current_file:
+            return
+        self.stream_info = self._probe_stream_info(self.current_file)
     
     def _update_stream_display(self):
         if not self.stream_info or not hasattr(self, 'video_info_labels'):
@@ -12995,58 +13005,63 @@ class TVEditorDialog(ctk.CTkToplevel):
                         pass
             threading.Thread(target=load_poster, daemon=True).start()
     
-    def _save_current_episode(self):
-        """Save NFO for the currently selected episode"""
+    def _commit_current_episode_fields(self):
+        """Flush the episode currently shown in the editor back into
+        self.episodes_data so on-screen edits are included in any save."""
         if not self.current_episode:
-            messagebox.showwarning("No Episode", "Please select an episode first")
             return
-        
-        # Update episode data from fields
+
         ep_data = self.episodes_data.get(self.current_episode, {})
         ep_data['season'] = int(self.episode_field_vars.get('ep_season', ctk.StringVar()).get() or 1)
         ep_data['episode'] = int(self.episode_field_vars.get('ep_episode', ctk.StringVar()).get() or 1)
         ep_data['title'] = self.episode_field_vars.get('ep_title', ctk.StringVar()).get()
         ep_data['aired'] = self.episode_field_vars.get('ep_aired', ctk.StringVar()).get()
         ep_data['plot'] = self.ep_plot_text.get("1.0", "end-1c")
-        
+
         try:
             ep_data['rating'] = float(self.episode_field_vars.get('ep_rating', ctk.StringVar()).get() or 0)
         except:
             ep_data['rating'] = 0
-        
+
         # New extended fields
         try:
             ep_data['runtime'] = int(self.episode_field_vars.get('ep_runtime', ctk.StringVar()).get() or 0)
         except:
             ep_data['runtime'] = 0
-        
+
         try:
             ep_data['userrating'] = float(self.episode_field_vars.get('ep_userrating', ctk.StringVar()).get() or 0)
         except:
             ep_data['userrating'] = 0
-        
+
         # Parse directors, writers, guests from comma-separated strings
         directors_str = self.episode_field_vars.get('ep_directors', ctk.StringVar()).get()
         ep_data['directors'] = [d.strip() for d in directors_str.split(',') if d.strip()] if directors_str else []
-        
+
         writers_str = self.episode_field_vars.get('ep_writers', ctk.StringVar()).get()
         ep_data['writers'] = [w.strip() for w in writers_str.split(',') if w.strip()] if writers_str else []
-        
+
         guests_str = self.episode_field_vars.get('ep_guests', ctk.StringVar()).get()
         ep_data['guest_stars'] = [g.strip() for g in guests_str.split(',') if g.strip()] if guests_str else []
-        
+
         self.episodes_data[self.current_episode] = ep_data
-        
-        # Generate episode NFO
-        show_title = self.field_vars.get('title', ctk.StringVar()).get() or self.show_details.get('title', 'Unknown Show')
-        
+
+    def _write_episode_nfo(self, file, ep_data, stream_info=None):
+        """Build and write a single episode's NFO next to its video file.
+
+        Returns the full path of the written .nfo (raises on write failure)."""
+        show_title = self.field_vars.get('title', ctk.StringVar()).get()
+        if not show_title and self.show_details:
+            show_title = self.show_details.get('title', 'Unknown Show')
+        show_title = show_title or 'Unknown Show'
+
         episode_nfo_data = {
-            'name': ep_data['title'],
-            'season_number': ep_data['season'],
-            'episode_number': ep_data['episode'],
-            'overview': ep_data['plot'],
-            'air_date': ep_data['aired'],
-            'vote_average': ep_data['rating'],
+            'name': ep_data.get('title', ''),
+            'season_number': ep_data.get('season', 1),
+            'episode_number': ep_data.get('episode', 1),
+            'overview': ep_data.get('plot', ''),
+            'air_date': ep_data.get('aired', ''),
+            'vote_average': ep_data.get('rating', 0),
             'runtime': ep_data.get('runtime', 0),
             'userrating': ep_data.get('userrating', 0),
             'directors': ep_data.get('directors', []),
@@ -13054,26 +13069,38 @@ class TVEditorDialog(ctk.CTkToplevel):
             'guest_stars': ep_data.get('guest_stars', []),
             'still_path': ep_data.get('still_path', ''),
         }
-        
+
         # Add stream info if available
-        if self.stream_info:
-            episode_nfo_data['fileinfo'] = self.stream_info
-        
+        if stream_info:
+            episode_nfo_data['fileinfo'] = stream_info
+
         show_data = {
             'title': show_title,
             'id': self.show_details.get('id') if self.show_details else None
         }
-        
+
         nfo_content = NFOGenerator.generate_episode_nfo(episode_nfo_data, show_data)
-        
-        # Save next to video file
-        folder = os.path.dirname(self.current_episode)
-        basename = os.path.splitext(os.path.basename(self.current_episode))[0]
+
+        folder = os.path.dirname(file)
+        basename = os.path.splitext(os.path.basename(file))[0]
         nfo_path = os.path.join(folder, f"{basename}.nfo")
-        
+
+        with open(nfo_path, 'w', encoding='utf-8') as f:
+            f.write(nfo_content)
+        return nfo_path
+
+    def _save_current_episode(self):
+        """Save NFO for the currently selected episode"""
+        if not self.current_episode:
+            messagebox.showwarning("No Episode", "Please select an episode first")
+            return
+
+        # Pull the on-screen field values into episodes_data, then write.
+        self._commit_current_episode_fields()
+        ep_data = self.episodes_data.get(self.current_episode, {})
+
         try:
-            with open(nfo_path, 'w', encoding='utf-8') as f:
-                f.write(nfo_content)
+            nfo_path = self._write_episode_nfo(self.current_episode, ep_data, self.stream_info)
             messagebox.showinfo("Saved", f"Episode NFO saved:\n{nfo_path}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save episode NFO: {e}")
@@ -13204,8 +13231,32 @@ class TVEditorDialog(ctk.CTkToplevel):
                     saved_files.append("landscape.jpg")
                 except:
                     pass
-        
-        messagebox.showinfo("Success", f"TV show data saved!\n\n• " + "\n• ".join(saved_files))
+
+        # Write an NFO next to every episode file using the scraped/edited
+        # data. Flush the episode currently shown in the editor first so its
+        # unsaved edits are included.
+        self._commit_current_episode_fields()
+
+        episode_nfo_count = 0
+        episode_nfo_errors = []
+        for ep_file, ep_data in self.episodes_data.items():
+            try:
+                # Probe each file individually so every episode NFO carries
+                # its own stream details rather than the current file's.
+                stream_info = self._probe_stream_info(ep_file)
+                self._write_episode_nfo(ep_file, ep_data, stream_info)
+                episode_nfo_count += 1
+            except Exception as e:
+                print(f"Failed to write episode NFO for {ep_file}: {e}")
+                episode_nfo_errors.append(os.path.basename(ep_file))
+
+        if episode_nfo_count:
+            saved_files.append(f"{episode_nfo_count} episode NFO file(s)")
+
+        summary = f"TV show data saved!\n\n• " + "\n• ".join(saved_files)
+        if episode_nfo_errors:
+            summary += "\n\nCould not write NFO for:\n• " + "\n• ".join(episode_nfo_errors)
+        messagebox.showinfo("Success", summary)
         self.destroy()
 
 
