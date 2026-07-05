@@ -9352,7 +9352,7 @@ class TVLibraryDialog(ctk.CTkToplevel):
     
     def _open_editor(self, show):
         if show.get('video_files'):
-            dialog = TVEditorDialog(self.master, show['video_files'])
+            dialog = open_child_window(TVEditorDialog(self.master, show['video_files']), self)
     
     def _rescan_show(self, show):
         """Rescan just this show's folder"""
@@ -10319,7 +10319,7 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         """Open the full Movie Editor for this movie"""
         if movie.get('video_file'):
             self.grab_release()
-            dialog = MovieEditorDialog(self.master, [movie['video_file']])
+            dialog = open_child_window(MovieEditorDialog(self.master, [movie['video_file']]), self)
     
     def _quick_search_tmdb(self, movie: Dict):
         """Quick search TMDB for movie info"""
@@ -10954,7 +10954,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 files.append(os.path.join(album['path'], f))
         
         if files:
-            dialog = TagEditorDialog(self.master, sorted(files))
+            dialog = open_child_window(TagEditorDialog(self.master, sorted(files)), self)
     
     def _rescan_album(self, album: Dict):
         """Rescan just this album's folder"""
@@ -13846,6 +13846,65 @@ else:
     DnDCTk = ctk.CTk
 
 
+def open_child_window(child, launcher):
+    """Single-window navigation helper.
+
+    Hides ``launcher`` (the window that opened ``child``) while ``child`` is
+    displayed, and restores it once ``child`` is closed.  This keeps only one
+    window visible at a time instead of letting library/editor windows stack
+    on top of each other.
+
+    Restoration is idempotent and fires whether the child is dismissed via the
+    window-manager close button or by destroying itself (e.g. a Close/Save
+    button).  Returns ``child`` so callers can keep chaining.
+    """
+    if child is None or launcher is None:
+        return child
+
+    try:
+        launcher.withdraw()
+    except Exception:
+        pass
+
+    state = {'restored': False}
+
+    def restore():
+        if state['restored']:
+            return
+        state['restored'] = True
+        try:
+            if launcher.winfo_exists():
+                launcher.deiconify()
+                launcher.lift()
+                launcher.focus_force()
+        except Exception:
+            pass
+
+    def on_wm_close():
+        restore()
+        try:
+            child.destroy()
+        except Exception:
+            pass
+
+    try:
+        child.protocol("WM_DELETE_WINDOW", on_wm_close)
+    except Exception:
+        pass
+
+    def on_destroy(event):
+        # <Destroy> bubbles up from descendants too; only react to the window.
+        if event.widget is child:
+            restore()
+
+    try:
+        child.bind("<Destroy>", on_destroy, add="+")
+    except Exception:
+        pass
+
+    return child
+
+
 class PyRenamerApp(DnDCTk):
     """Main application - Paragon Edition"""
     
@@ -14904,7 +14963,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = MovieLibraryDialog(self, folder)
+        dialog = open_child_window(MovieLibraryDialog(self, folder), self)
     
     def _load_music_library_path(self):
         """Load saved Music library path"""
@@ -14986,7 +15045,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = MusicLibraryDialog(self, folder)
+        dialog = open_child_window(MusicLibraryDialog(self, folder), self)
     
     def _open_file_library(self):
         """Open File Library browser for general file management and renaming"""
@@ -14995,7 +15054,7 @@ MusicBrainz Album Lookup:
         if not folder:
             return
         
-        dialog = FileLibraryDialog(self, folder)
+        dialog = open_child_window(FileLibraryDialog(self, folder), self)
     
     def _open_movie_scraper(self):
         """Open movie scraper dialog"""
@@ -15041,7 +15100,7 @@ MusicBrainz Album Lookup:
         print("DEBUG: Creating MovieEditorDialog")
         sys.stdout.flush()
         
-        dialog = MovieEditorDialog(self, files)
+        dialog = open_child_window(MovieEditorDialog(self, files), self)
         print("DEBUG: _open_movie_scraper END")
         sys.stdout.flush()
     
@@ -15071,7 +15130,7 @@ MusicBrainz Album Lookup:
             messagebox.showinfo("No Video Files", "No video files selected or loaded.\n\nSupported: MKV, MP4, AVI, MOV, WMV, M4V")
             return
         
-        dialog = TVEditorDialog(self, files)
+        dialog = open_child_window(TVEditorDialog(self, files), self)
     
     def _open_tv_library(self):
         """Open TV Library browser to manage multiple TV shows"""
@@ -15117,7 +15176,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = TVLibraryDialog(self, folder)
+        dialog = open_child_window(TVLibraryDialog(self, folder), self)
     
     def _open_tag_editor(self):
         """Open the full tag editor window"""
@@ -15135,7 +15194,7 @@ MusicBrainz Album Lookup:
             return
         
         # Open tag editor dialog
-        dialog = TagEditorDialog(self, files)
+        dialog = open_child_window(TagEditorDialog(self, files), self)
     
     def _open_album_lookup(self):
         """Open MusicBrainz album lookup dialog"""
