@@ -3332,7 +3332,7 @@ class ParagonFileBrowser(ctk.CTkToplevel):
         self.path_entry.bind("<Return>", self._on_path_enter)
         
         # Quick access dropdown - matching header font style
-        locations = ["Home", "Desktop", "Documents", "Downloads", "/mnt", "/"]
+        locations = list(self._quick_access_locations().keys())
         self.quick_access = ctk.CTkOptionMenu(
             nav_frame,
             values=locations,
@@ -3713,16 +3713,39 @@ class ParagonFileBrowser(ctk.CTkToplevel):
             self.path_entry.delete(0, "end")
             self.path_entry.insert(0, str(self.current_path))
     
-    def _on_quick_access(self, choice):
-        """Handle quick access dropdown"""
+    def _quick_access_locations(self):
+        """Ordered quick-access label -> Path map, tailored to the platform.
+
+        On Windows the POSIX '/mnt' and '/' roots are replaced with the
+        machine's actual drive letters (C:, T:, ...) so the shortcuts point
+        somewhere real."""
         locations = {
             "Home": Path.home(),
             "Desktop": Path.home() / "Desktop",
             "Documents": Path.home() / "Documents",
             "Downloads": Path.home() / "Downloads",
-            "/mnt": Path("/mnt"),
-            "/": Path("/")
         }
+        if os.name == 'nt':
+            # Enumerate assigned drive letters without touching the drives
+            # (GetLogicalDrives is a cheap bitmask - avoids stalling on a
+            # disconnected mapped network drive).
+            import string
+            try:
+                import ctypes
+                bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            except Exception:
+                bitmask = 0
+            for i, letter in enumerate(string.ascii_uppercase):
+                if bitmask & (1 << i):
+                    locations[f"{letter}:"] = Path(f"{letter}:\\")
+        else:
+            locations["/mnt"] = Path("/mnt")
+            locations["/"] = Path("/")
+        return locations
+
+    def _on_quick_access(self, choice):
+        """Handle quick access dropdown"""
+        locations = self._quick_access_locations()
         if choice in locations:
             path = locations[choice]
             if path.exists():
@@ -13919,7 +13942,13 @@ class PyRenamerApp(DnDCTk):
         def _preload():
             import time
             mnt_path = "/mnt"
-            
+
+            # /mnt only exists on POSIX systems (Linux/macOS). On Windows
+            # network shares are mapped to drive letters, so there is nothing
+            # to preload here - skip quietly instead of printing an error.
+            if not os.path.isdir(mnt_path):
+                return
+
             try:
                 # Only preload /mnt itself - keep it light!
                 dirs = []
