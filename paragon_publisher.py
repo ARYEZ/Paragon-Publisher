@@ -9010,22 +9010,97 @@ class TVScraperDialog(ctk.CTkToplevel):
 
 
 
-class TVLibraryDialog(ctk.CTkToplevel):
-    """MediaElch-style TV Library browser for managing multiple TV shows"""
-    
-    def __init__(self, parent, library_path: str):
+class TVFlowWindow(ctk.CTkToplevel):
+    """Single-window host for the TV flow.
+
+    Holds one container and swaps between the TV Library view and the TV Editor
+    view via a small navigation stack, so the whole Library -> Editor -> back
+    journey happens inside one maximized window instead of separate stacked
+    windows. This is the incremental single-page (SPA) model for the TV flow;
+    Movies/Music/Files still use the older separate-window navigation.
+    """
+
+    def __init__(self, parent, library_path=None, editor_files=None):
         super().__init__(parent)
-        
+
+        self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.geometry("1400x850")
+        self.minsize(1000, 700)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
+
+        # The single container that every view is packed into.
+        self.container = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
+        self.container.pack(fill="both", expand=True)
+
+        # Navigation stack of {'view': frame, 'title': str}. The bottom entry
+        # is the root; going back from it closes the window.
+        self._view_stack = []
+
+        if editor_files:
+            # Entry point from the "TV scraper" button: open straight to the
+            # editor for the selected files.
+            self.open_editor(editor_files)
+        else:
+            self.show_library(library_path)
+
+    def _toggle_maximize(self):
+        try:
+            if self.state() in ('zoomed', 'maximized'):
+                self.state('normal')
+            else:
+                self.state('zoomed')
+        except Exception:
+            try:
+                self.attributes('-fullscreen', not self.attributes('-fullscreen'))
+            except Exception:
+                pass
+
+    def _push(self, view, title):
+        # Hide the current top view but keep it alive so its state (scroll
+        # position, loaded data) survives until we navigate back to it.
+        if self._view_stack:
+            self._view_stack[-1]['view'].pack_forget()
+        self._view_stack.append({'view': view, 'title': title})
+        view.pack(fill="both", expand=True)
+        self.title(title)
+
+    def go_back(self):
+        """Return to the previous view; close the window if at the root view."""
+        if len(self._view_stack) <= 1:
+            self.destroy()
+            return
+        top = self._view_stack.pop()
+        try:
+            top['view'].destroy()
+        except Exception:
+            pass
+        prev = self._view_stack[-1]
+        prev['view'].pack(fill="both", expand=True)
+        self.title(prev['title'])
+
+    def show_library(self, library_path):
+        self._push(TVLibraryView(self.container, self, library_path), "TV Library")
+
+    def open_editor(self, files):
+        self._push(TVEditorView(self.container, self, files), "TV Show Editor")
+
+
+class TVLibraryView(ctk.CTkFrame):
+    """MediaElch-style TV Library browser for managing multiple TV shows.
+
+    Embeddable view hosted inside a TVFlowWindow rather than being its own
+    top-level window.
+    """
+
+    def __init__(self, parent, host, library_path: str):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.library_path = library_path
         self.shows = []
         self.selected_show = None
         self.show_widgets = {}
-        
-        self.title("TV Library")
-        self.geometry("1400x850")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
-        
+
         self._create_ui()
         self._load_library()
     
@@ -9108,11 +9183,11 @@ class TVLibraryDialog(ctk.CTkToplevel):
         bottom = ctk.CTkFrame(main, fg_color="transparent", height=60)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
         
-        ParagonButton(bottom, text="CLOSE", command=self.destroy,
+        ParagonButton(bottom, text="CLOSE", command=self.host.go_back,
                      width=120, height=44,
                      fg_color=ParagonTheme.BG_TERTIARY,
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
-    
+
     def _load_library(self):
         cached = LibraryCache.load_cache('tv', self.library_path)
         if cached:
@@ -9375,7 +9450,7 @@ class TVLibraryDialog(ctk.CTkToplevel):
     
     def _open_editor(self, show):
         if show.get('video_files'):
-            dialog = open_child_window(TVEditorDialog(self.master, show['video_files']), self)
+            self.host.open_editor(show['video_files'])
     
     def _rescan_show(self, show):
         """Rescan just this show's folder"""
@@ -11057,8 +11132,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             self._scan_library()
 
 
-class TVEditorDialog(ctk.CTkToplevel):
-    """MediaElch-style TV show editor with Show/Episode modes and full editing capabilities"""
+class TVEditorView(ctk.CTkFrame):
+    """MediaElch-style TV show editor with Show/Episode modes and full editing capabilities.
+
+    Embeddable view hosted inside a TVFlowWindow rather than being its own
+    top-level window.
+    """
     
     # Font sizes
     FONT_SMALL = 16
@@ -11076,9 +11155,10 @@ class TVEditorDialog(ctk.CTkToplevel):
     
     CERTIFICATIONS = ["TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA", "G", "PG", "PG-13", "R", "NC-17", "NR"]
     
-    def __init__(self, master, files: List[str]):
-        super().__init__(master)
-        
+    def __init__(self, parent, host, files: List[str]):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.files = files
         self.current_file = files[0] if files else None
         self.search_results = []
@@ -11101,19 +11181,10 @@ class TVEditorDialog(ctk.CTkToplevel):
         self.selected_genres = set()
         self.selected_studios = set()
         
-        self.title("TV Show Editor")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
-        
-        # FORCE window size BEFORE creating UI
-        self.geometry("1700x1000+100+50")
-        self.update_idletasks()
-        self.minsize(1200, 800)
-        
         try:
             self._create_ui()
         except Exception as e:
-            print(f"ERROR in TVEditorDialog._create_ui: {e}")
+            print(f"ERROR in TVEditorView._create_ui: {e}")
             import traceback
             traceback.print_exc()
             return
@@ -11138,13 +11209,7 @@ class TVEditorDialog(ctk.CTkToplevel):
                         self.search_entry.insert(0, parsed['show'])
             except Exception as e:
                 print(f"ERROR loading existing data: {e}")
-        
-        # Force window size AGAIN after creating UI
-        self.update_idletasks()
-        self.geometry("1700x1000+100+50")
-        self.lift()
-        self.focus_force()
-    
+
     def _parse_episode_files(self):
         """Parse all files to extract episode info"""
         for f in self.files:
@@ -11359,9 +11424,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
         btn_frame.pack(fill="x", padx=15, pady=(5, 12))
         
-        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.destroy, width=100).pack(side="left")
+        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.host.go_back, width=100).pack(side="left")
         ParagonButton(btn_frame, text="SAVE ALL", command=self._save_all, width=130).pack(side="right")
-    
+
     def _switch_mode(self, mode: str):
         """Switch between show and episode editing modes"""
         self.edit_mode = mode
@@ -11993,15 +12058,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         ParagonButton(search_frame, text="SEARCH", command=self._search, width=120, height=45).pack(side="left", padx=(5, 15), pady=10)
     
     def _toggle_maximize(self):
-        try:
-            current_state = self.state()
-            if current_state == 'zoomed' or current_state == 'maximized':
-                self.state('normal')
-            else:
-                self.state('zoomed')
-        except:
-            self.attributes('-fullscreen', not self.attributes('-fullscreen'))
-    
+        # Maximizing is a window concern; delegate to the host window.
+        self.host._toggle_maximize()
+
     def _create_show_info_tab(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
@@ -13282,7 +13341,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         if episode_nfo_errors:
             summary += "\n\nCould not write NFO for:\n• " + "\n• ".join(episode_nfo_errors)
         messagebox.showinfo("Success", summary)
-        self.destroy()
+        self.host.go_back()
 
 
 # =============================================================================
@@ -15258,7 +15317,7 @@ MusicBrainz Album Lookup:
             messagebox.showinfo("No Video Files", "No video files selected or loaded.\n\nSupported: MKV, MP4, AVI, MOV, WMV, M4V")
             return
         
-        dialog = open_child_window(TVEditorDialog(self, files), self)
+        dialog = open_child_window(TVFlowWindow(self, editor_files=files), self)
     
     def _open_tv_library(self):
         """Open TV Library browser to manage multiple TV shows"""
@@ -15304,7 +15363,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = open_child_window(TVLibraryDialog(self, folder), self)
+        dialog = open_child_window(TVFlowWindow(self, library_path=folder), self)
     
     def _open_tag_editor(self):
         """Open the full tag editor window"""
