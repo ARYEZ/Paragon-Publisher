@@ -4634,26 +4634,18 @@ class TagFilenameDialog(ctk.CTkToplevel):
         self.destroy()
 
 
-class TagEditorDialog(ctk.CTkToplevel):
-    """Full tag editor dialog window"""
-    
-    def __init__(self, master, files: List[str]):
-        super().__init__(master)
-        
+class TagEditorView(ctk.CTkFrame):
+    """Full tag editor view (embedded in a MediaFlowWindow)."""
+
+    def __init__(self, parent, host, files: List[str]):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.files = files
         self.current_index = 0
         self.cover_image_data: Optional[bytes] = None
         self._cover_photo = None
-        
-        self.title("🎵 Tag Editor")
-        self.geometry("900x700")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        
-        # Maximize window and bring to front
-        self.after(10, lambda: self.state('zoomed'))
-        self.lift()
-        self.focus_force()
-        
+
         self._create_ui()
         self._load_current_file()
     
@@ -4728,8 +4720,8 @@ class TagEditorDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
         btn_frame.pack(fill="x", padx=20, pady=(10, 20))
         
-        ParagonSecondaryButton(btn_frame, text="CLOSE", command=self.destroy, width=100).pack(side="left")
-        
+        ParagonSecondaryButton(btn_frame, text="CLOSE", command=self.host.go_back, width=100).pack(side="left")
+
         # MusicBrainz lookup button
         ParagonButton(
             btn_frame, text="🔍 MUSICBRAINZ LOOKUP",
@@ -7068,8 +7060,9 @@ class ImageChooserDialog(ctk.CTkToplevel):
         return self.selected_path
 
 
-class MovieEditorDialog(ctk.CTkToplevel):
-    """MediaElch-style movie editor with Information, Extended, and Stream Details tabs"""
+class MovieEditorView(ctk.CTkFrame):
+    """MediaElch-style movie editor (embedded in a MediaFlowWindow) with
+    Information, Extended, and Stream Details tabs"""
     
     # Font sizes (doubled for readability)
     FONT_SMALL = 16
@@ -7148,9 +7141,10 @@ class MovieEditorDialog(ctk.CTkToplevel):
     # Available certifications
     CERTIFICATIONS = ["G", "PG", "PG-13", "R", "NC-17", "NR", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA"]
     
-    def __init__(self, master, files: List[str]):
-        super().__init__(master)
-        
+    def __init__(self, parent, host, files: List[str]):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.files = files
         self.current_file = files[0] if files else None
         self.search_results = []
@@ -7170,12 +7164,6 @@ class MovieEditorDialog(ctk.CTkToplevel):
         self.selected_countries = set()
         self.selected_studios = set()
         
-        self.title("Movie Editor")
-        self.geometry("1600x950")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
-        # self.transient(master)  # Disabled - causes window issues on Windows
-        
         self._create_ui()
         self._extract_stream_info()
         
@@ -7190,9 +7178,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
                     self.search_entry.insert(0, parsed['title'])
                     if parsed.get('year'):
                         self.year_entry.insert(0, parsed['year'])
-        
-        self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
-    
+
     def _load_existing_data(self) -> bool:
         """Load existing NFO file and artwork. Returns True if NFO was found."""
         if not self.current_file:
@@ -7639,9 +7625,9 @@ class MovieEditorDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
         btn_frame.pack(fill="x", padx=15, pady=(0, 10))
         
-        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.destroy, width=120).pack(side="left")
+        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.host.go_back, width=120).pack(side="left")
         ParagonButton(btn_frame, text="SAVE ALL", command=self._save_all, width=160).pack(side="right")
-    
+
     def _start_resize(self, event):
         """Start resizing left panel"""
         self._resize_start_x = event.x_root
@@ -7702,17 +7688,9 @@ class MovieEditorDialog(ctk.CTkToplevel):
         ParagonButton(search_frame, text="SEARCH", command=self._search, width=120, height=45).pack(side="left", padx=(5, 15), pady=10)
     
     def _toggle_maximize(self):
-        """Toggle window maximize state"""
-        try:
-            current_state = self.state()
-            if current_state == 'zoomed' or current_state == 'maximized':
-                self.state('normal')
-            else:
-                self.state('zoomed')
-        except:
-            # Fallback for systems that don't support 'zoomed'
-            self.attributes('-fullscreen', not self.attributes('-fullscreen'))
-    
+        # Maximizing is a window concern; delegate to the host window.
+        self.host._toggle_maximize()
+
     def _create_info_tab(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
@@ -8357,8 +8335,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
             messagebox.showwarning("Complete", f"Saved {success} file(s).\n\nErrors:\n" + "\n".join(errors[:5]))
         else:
             messagebox.showinfo("Success", f"Successfully saved {success} file(s)!")
-        
-        self.destroy()
+
+        self.host.go_back()
 
 
 class TVScraperDialog(ctk.CTkToplevel):
@@ -9010,22 +8988,29 @@ class TVScraperDialog(ctk.CTkToplevel):
 
 
 
-class TVFlowWindow(ctk.CTkToplevel):
-    """Single-window host for the TV flow.
+class MediaFlowWindow(ctk.CTkToplevel):
+    """Single-window host that swaps between a Library view and an Editor view.
 
-    Holds one container and swaps between the TV Library view and the TV Editor
-    view via a small navigation stack, so the whole Library -> Editor -> back
-    journey happens inside one maximized window instead of separate stacked
-    windows. This is the incremental single-page (SPA) model for the TV flow;
-    Movies/Music/Files still use the older separate-window navigation.
+    Holds one container and a small navigation stack so the whole
+    Library -> Editor -> back journey happens inside one maximized window
+    instead of separate stacked windows (the single-page / SPA model).
+
+    Subclasses set the geometry/title class attributes and implement the two
+    view factories (make_library_view / make_editor_view). Used by TV, Movie
+    and Music flows; the File library stays a plain single-view dialog.
     """
+
+    default_geometry = "1400x850"
+    min_size = (1000, 700)
+    library_title = "Library"
+    editor_title = "Editor"
 
     def __init__(self, parent, library_path=None, editor_files=None):
         super().__init__(parent)
 
         self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.geometry("1400x850")
-        self.minsize(1000, 700)
+        self.geometry(self.default_geometry)
+        self.minsize(*self.min_size)
         self.after(10, lambda: self.state('zoomed'))  # Maximize window
 
         # The single container that every view is packed into.
@@ -9037,8 +9022,8 @@ class TVFlowWindow(ctk.CTkToplevel):
         self._view_stack = []
 
         if editor_files:
-            # Entry point from the "TV scraper" button: open straight to the
-            # editor for the selected files.
+            # Entry point from a "scraper" button: open straight to the editor
+            # for the selected files.
             self.open_editor(editor_files)
         else:
             self.show_library(library_path)
@@ -9078,11 +9063,54 @@ class TVFlowWindow(ctk.CTkToplevel):
         prev['view'].pack(fill="both", expand=True)
         self.title(prev['title'])
 
+    # --- subclass hooks -----------------------------------------------------
+    def make_library_view(self, container, library_path):
+        raise NotImplementedError
+
+    def make_editor_view(self, container, files):
+        raise NotImplementedError
+
     def show_library(self, library_path):
-        self._push(TVLibraryView(self.container, self, library_path), "TV Library")
+        self._push(self.make_library_view(self.container, library_path), self.library_title)
 
     def open_editor(self, files):
-        self._push(TVEditorView(self.container, self, files), "TV Show Editor")
+        self._push(self.make_editor_view(self.container, files), self.editor_title)
+
+
+class TVFlowWindow(MediaFlowWindow):
+    default_geometry = "1400x850"
+    library_title = "TV Library"
+    editor_title = "TV Show Editor"
+
+    def make_library_view(self, container, library_path):
+        return TVLibraryView(container, self, library_path)
+
+    def make_editor_view(self, container, files):
+        return TVEditorView(container, self, files)
+
+
+class MovieFlowWindow(MediaFlowWindow):
+    default_geometry = "1600x950"
+    library_title = "Movie Library"
+    editor_title = "Movie Editor"
+
+    def make_library_view(self, container, library_path):
+        return MovieLibraryView(container, self, library_path)
+
+    def make_editor_view(self, container, files):
+        return MovieEditorView(container, self, files)
+
+
+class MusicFlowWindow(MediaFlowWindow):
+    default_geometry = "1500x900"
+    library_title = "Music Library"
+    editor_title = "Tag Editor"
+
+    def make_library_view(self, container, library_path):
+        return MusicLibraryView(container, self, library_path)
+
+    def make_editor_view(self, container, files):
+        return TagEditorView(container, self, files)
 
 
 class TVLibraryView(ctk.CTkFrame):
@@ -9951,22 +9979,18 @@ class FileLibraryDialog(ctk.CTkToplevel):
             self._scan_folder()
 
 
-class MovieLibraryDialog(ctk.CTkToplevel):
-    """MediaElch-style Movie Library browser for managing multiple movies"""
-    
-    def __init__(self, parent, library_path: str):
-        super().__init__(parent)
-        
+class MovieLibraryView(ctk.CTkFrame):
+    """MediaElch-style Movie Library browser (embedded in a MediaFlowWindow)."""
+
+    def __init__(self, parent, host, library_path: str):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.library_path = library_path
         self.movies = []  # List of {name, path, year, has_nfo, poster_path, etc}
         self.selected_movie = None
         self.movie_widgets = {}
-        
-        self.title("Movie Library")
-        self.geometry("1400x850")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
-        
+
         self._create_ui()
         self._load_library()  # Try cache first
     
@@ -10048,12 +10072,12 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=24))
         self.detail_placeholder.pack(expand=True)
-        
+
         # Bottom buttons
         bottom = ctk.CTkFrame(main, fg_color="transparent", height=60)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
-        
-        ParagonButton(bottom, text="CLOSE", command=self.destroy,
+
+        ParagonButton(bottom, text="CLOSE", command=self.host.go_back,
                      width=120, height=44,
                      fg_color=ParagonTheme.BG_TERTIARY,
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
@@ -10416,8 +10440,7 @@ class MovieLibraryDialog(ctk.CTkToplevel):
     def _open_full_editor(self, movie: Dict):
         """Open the full Movie Editor for this movie"""
         if movie.get('video_file'):
-            self.grab_release()
-            dialog = open_child_window(MovieEditorDialog(self.master, [movie['video_file']]), self)
+            self.host.open_editor([movie['video_file']])
     
     def _quick_search_tmdb(self, movie: Dict):
         """Quick search TMDB for movie info"""
@@ -10514,12 +10537,13 @@ class MovieLibraryDialog(ctk.CTkToplevel):
             self._scan_library()
 
 
-class MusicLibraryDialog(ctk.CTkToplevel):
-    """Music Library browser for managing music collection by artist/album"""
+class MusicLibraryView(ctk.CTkFrame):
+    """Music Library browser (embedded in a MediaFlowWindow), by artist/album"""
     
-    def __init__(self, parent, library_path: str):
-        super().__init__(parent)
-        
+    def __init__(self, parent, host, library_path: str):
+        super().__init__(parent, fg_color=ParagonTheme.BG_DARK)
+
+        self.host = host
         self.library_path = library_path
         self.artists = []  # List of {name, path, album_count, track_count}
         self.albums = []   # Albums for selected artist
@@ -10527,12 +10551,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self.selected_album = None
         self.artist_widgets = {}
         self.album_widgets = {}
-        
-        self.title("Music Library")
-        self.geometry("1500x900")
-        self.configure(fg_color=ParagonTheme.BG_DARK)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
-        
+
         self._create_ui()
         self._load_library()  # Try cache first
     
@@ -10638,12 +10657,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=24))
         self.detail_placeholder.pack(expand=True)
-        
+
         # Bottom buttons
         bottom = ctk.CTkFrame(main, fg_color="transparent", height=60)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
-        
-        ParagonButton(bottom, text="CLOSE", command=self.destroy,
+
+        ParagonButton(bottom, text="CLOSE", command=self.host.go_back,
                      width=120, height=44,
                      fg_color=ParagonTheme.BG_TERTIARY,
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
@@ -11052,7 +11071,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 files.append(os.path.join(album['path'], f))
         
         if files:
-            dialog = open_child_window(TagEditorDialog(self.master, sorted(files)), self)
+            self.host.open_editor(sorted(files))
     
     def _rescan_album(self, album: Dict):
         """Rescan just this album's folder"""
@@ -12184,7 +12203,7 @@ class TVEditorView(ctk.CTkFrame):
         
         # Get all genres including custom ones
         try:
-            all_genres = MovieEditorDialog.get_all_genres()
+            all_genres = MovieEditorView.get_all_genres()
         except:
             all_genres = self.DEFAULT_GENRES
         
@@ -12237,12 +12256,12 @@ class TVEditorView(ctk.CTkFrame):
             return
         
         try:
-            if MovieEditorDialog.add_custom_genre(genre):
+            if MovieEditorView.add_custom_genre(genre):
                 self.selected_genres.add(genre)
                 self._create_genre_chips()
                 messagebox.showinfo("Genre Added", f"'{genre}' has been added and will be available for all movies/TV shows.")
             else:
-                for g in MovieEditorDialog.get_all_genres():
+                for g in MovieEditorView.get_all_genres():
                     if g.lower() == genre.lower():
                         self.selected_genres.add(g)
                         break
@@ -15150,7 +15169,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = open_child_window(MovieLibraryDialog(self, folder), self)
+        dialog = open_child_window(MovieFlowWindow(self, library_path=folder), self)
     
     def _load_music_library_path(self):
         """Load saved Music library path"""
@@ -15232,7 +15251,7 @@ MusicBrainz Album Lookup:
             except:
                 pass
         
-        dialog = open_child_window(MusicLibraryDialog(self, folder), self)
+        dialog = open_child_window(MusicFlowWindow(self, library_path=folder), self)
     
     def _open_file_library(self):
         """Open File Library browser for general file management and renaming"""
@@ -15284,10 +15303,10 @@ MusicBrainz Album Lookup:
             messagebox.showinfo("No Video Files", "No video files selected or loaded.\n\nSupported: MKV, MP4, AVI, MOV, WMV, M4V")
             return
         
-        print("DEBUG: Creating MovieEditorDialog")
+        print("DEBUG: Creating MovieEditorView")
         sys.stdout.flush()
         
-        dialog = open_child_window(MovieEditorDialog(self, files), self)
+        dialog = open_child_window(MovieFlowWindow(self, editor_files=files), self)
         print("DEBUG: _open_movie_scraper END")
         sys.stdout.flush()
     
@@ -15381,7 +15400,7 @@ MusicBrainz Album Lookup:
             return
         
         # Open tag editor dialog
-        dialog = open_child_window(TagEditorDialog(self, files), self)
+        dialog = open_child_window(MusicFlowWindow(self, editor_files=files), self)
     
     def _open_album_lookup(self):
         """Open MusicBrainz album lookup dialog"""
