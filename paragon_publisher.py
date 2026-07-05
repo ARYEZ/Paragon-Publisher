@@ -5236,6 +5236,7 @@ class MusicBrainzDialog(ctk.CTkToplevel):
         self.title("🔍 MusicBrainz Lookup")
         self.geometry("950x700")
         self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
         # self.transient(master)  # Disabled - causes window issues on Windows
         
         self._create_ui(initial_tags)
@@ -5654,6 +5655,7 @@ class MusicBrainzAlbumLookup(ctk.CTkToplevel):
         self.title("🎵 MusicBrainz Album Lookup")
         self.geometry("1100x750")
         self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
         # self.transient(master)  # Disabled - causes window issues on Windows
         
         self._create_ui()
@@ -6169,6 +6171,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.title("🎬 Movie Scraper")
         self.geometry("1100x750")
         self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
         # self.transient(master)  # Disabled - causes window issues on Windows
         
         print("DEBUG: Creating UI")
@@ -6718,6 +6721,7 @@ class ImageChooserDialog(ctk.CTkToplevel):
         self.title(f"Choose {type_names.get(self.display_type, 'Image')}")
         self.geometry("1200x800")
         self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
         # self.transient(master)  # Disabled - causes window issues on Windows
         
         self._create_ui()
@@ -8361,6 +8365,7 @@ class TVScraperDialog(ctk.CTkToplevel):
         self.title("📺 TV Show Scraper")
         self.geometry("1200x800")
         self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.after(10, lambda: self.state('zoomed'))  # Maximize window
         # self.transient(master)  # Disabled - causes window issues on Windows
         
         self._create_ui()
