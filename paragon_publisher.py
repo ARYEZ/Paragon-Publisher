@@ -13105,6 +13105,26 @@ class TVEditorDialog(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save episode NFO: {e}")
     
+    def _get_show_root_folder(self):
+        """Return the show's root folder (where tvshow.nfo and show artwork go).
+
+        Episodes usually live in a 'Season X' / 'Specials' subfolder, in which
+        case the show root is that folder's parent. If the episodes sit
+        directly in the show folder, that folder is the root."""
+        if not self.current_file:
+            return None
+
+        folder = os.path.dirname(self.current_file)
+        name = os.path.basename(folder.rstrip('/\\'))
+
+        # 'Season 1', 'Season01', 'Season_1', 'Specials', ... -> use the parent.
+        if re.match(r'^(specials\b|season[\s._-]*\d)', name, re.IGNORECASE):
+            parent = os.path.dirname(folder.rstrip('/\\'))
+            if parent and os.path.isdir(parent):
+                return parent
+
+        return folder
+
     def _save_all(self):
         """Save tvshow.nfo and download artwork"""
         if not self.show_details and not self.field_vars.get('title', ctk.StringVar()).get():
@@ -13152,9 +13172,14 @@ class TVEditorDialog(ctk.CTkToplevel):
             'cast': self.show_details.get('cast', []) if self.show_details else [],
             'creators': self.show_details.get('creators', []) if self.show_details else [],
         }
-        
-        folder = os.path.dirname(self.current_file)
-        
+
+        # tvshow.nfo and show artwork belong in the show's root folder, not
+        # inside a Season subfolder where the episode files live.
+        folder = self._get_show_root_folder()
+        if not folder:
+            messagebox.showerror("Error", "Could not determine the show's folder.")
+            return
+
         # Save tvshow.nfo
         nfo_content = NFOGenerator.generate_tvshow_nfo(show_data)
         nfo_path = os.path.join(folder, "tvshow.nfo")
