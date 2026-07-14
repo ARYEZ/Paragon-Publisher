@@ -59,6 +59,14 @@ try:
 except ImportError:
     HAS_DND = False
 
+# Paragon Harvester - YouTube/folder video organizer (optional integration)
+try:
+    import paragon_harvester
+    HAS_HARVESTER = True
+except Exception:
+    HAS_HARVESTER = False
+    paragon_harvester = None
+
 
 # =============================================================================
 # MOUSE WHEEL SCROLL FIX FOR CUSTOMTKINTER
@@ -14676,8 +14684,15 @@ MusicBrainz Album Lookup:
             text="📁 FILE LIBRARY",
             command=self._open_file_library,
             width=150
+        ).pack(side="left", padx=(0, 10))
+
+        ParagonButton(
+            btn_frame,
+            text="🌾 HARVESTER",
+            command=self._open_harvester,
+            width=160
         ).pack(side="left")
-        
+
         print("DEBUG: _create_media_tab END")
     
     def _load_tmdb_api_key(self):
@@ -14994,9 +15009,20 @@ MusicBrainz Album Lookup:
         folder = filedialog.askdirectory(title="Select Folder to Browse")
         if not folder:
             return
-        
+
         dialog = FileLibraryDialog(self, folder)
-    
+
+    def _open_harvester(self):
+        """Open the Paragon Harvester dialog (YouTube/folder video organizer)."""
+        if not HAS_HARVESTER:
+            messagebox.showerror(
+                "Harvester Unavailable",
+                "The paragon_harvester module could not be loaded.\n\n"
+                "Make sure paragon_harvester.py is next to paragon_publisher.py."
+            )
+            return
+        HarvesterDialog(self)
+
     def _open_movie_scraper(self):
         """Open movie scraper dialog"""
         print("DEBUG: _open_movie_scraper CALLED!")
@@ -17125,6 +17151,292 @@ MusicBrainz Album Lookup:
                 pass
         
         return sorted(presets, key=lambda x: x['name'].lower())
+
+
+# =============================================================================
+# PARAGON HARVESTER DIALOG
+# =============================================================================
+
+class HarvesterDialog(ctk.CTkToplevel):
+    """GUI front-end for paragon_harvester: organize a folder of videos into
+    Kodi show folders (with NFOs) in one pass, or monitor a folder for new
+    videos. Output is produced by the harvester module unchanged, so it matches
+    the validated standalone tool byte-for-byte."""
+
+    CONFIG_PATH = Path.home() / ".pyrenamer_config.json"
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.title("Paragon Harvester")
+        self.geometry("900x680")
+        self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.transient(parent)
+
+        self._worker = None            # background thread
+        self._monitoring = False       # monitor mode active?
+        self._stop_event = threading.Event()
+
+        cfg = self._load_config()
+
+        self._create_ui(cfg)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
+
+    # ---- config ---------------------------------------------------------
+    def _load_config(self):
+        try:
+            if self.CONFIG_PATH.exists():
+                with open(self.CONFIG_PATH, "r") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _save_config(self):
+        try:
+            cfg = {}
+            if self.CONFIG_PATH.exists():
+                with open(self.CONFIG_PATH, "r") as f:
+                    cfg = json.load(f)
+            cfg["harvester_source"] = self.source_entry.get().strip()
+            cfg["harvester_dest"] = self.dest_entry.get().strip()
+            cfg["harvester_genre"] = self.genre_entry.get().strip()
+            cfg["harvester_channel"] = self.channel_entry.get().strip()
+            cfg["harvester_nfo"] = self.nfo_var.get()
+            with open(self.CONFIG_PATH, "w") as f:
+                json.dump(cfg, f)
+        except Exception:
+            pass
+
+    # ---- UI -------------------------------------------------------------
+    def _create_ui(self, cfg):
+        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
+        main.pack(fill="both", expand=True)
+
+        # Header
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=70)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        header_inner = ctk.CTkFrame(header, fg_color="transparent")
+        header_inner.pack(fill="both", expand=True, padx=20, pady=12)
+        ctk.CTkLabel(header_inner, text="🌾 PARAGON HARVESTER",
+                     font=ctk.CTkFont(family="Bebas Neue", size=34),
+                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
+        self.status_label = ctk.CTkLabel(header_inner, text="Idle",
+                                         text_color=ParagonTheme.TEXT_SECONDARY,
+                                         font=ctk.CTkFont(size=15))
+        self.status_label.pack(side="right")
+
+        # Form
+        form = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        form.pack(fill="x", padx=12, pady=(12, 6))
+
+        self.source_entry = self._path_row(form, "Source folder", cfg.get("harvester_source", ""))
+        self.dest_entry = self._path_row(form, "Destination", cfg.get("harvester_dest", ""))
+
+        # Genre + channel row
+        gc = ctk.CTkFrame(form, fg_color="transparent")
+        gc.pack(fill="x", padx=12, pady=(2, 6))
+        ParagonLabel(gc, text="Default genre", style="muted", width=110, anchor="w").pack(side="left")
+        self.genre_entry = ParagonEntry(gc, width=180)
+        self.genre_entry.insert(0, cfg.get("harvester_genre", ""))
+        self.genre_entry.pack(side="left", padx=(6, 16))
+        ParagonLabel(gc, text="YouTube channel", style="muted", anchor="w").pack(side="left")
+        self.channel_entry = ParagonEntry(gc, width=240)
+        self.channel_entry.insert(0, cfg.get("harvester_channel", ""))
+        self.channel_entry.pack(side="left", padx=(6, 0))
+
+        # NFO handling + hint row
+        nf = ctk.CTkFrame(form, fg_color="transparent")
+        nf.pack(fill="x", padx=12, pady=(2, 10))
+        ParagonLabel(nf, text="Existing NFO", style="muted", width=110, anchor="w").pack(side="left")
+        self.nfo_var = ctk.StringVar(value=cfg.get("harvester_nfo", "skip"))
+        ParagonOptionMenu(nf, values=["skip", "overwrite"], variable=self.nfo_var,
+                          width=140).pack(side="left", padx=(6, 16))
+        hint = "yt-dlp + ffmpeg add richer metadata when installed."
+        if not paragon_harvester.WATCHDOG_AVAILABLE:
+            hint += "  (Monitor needs: pip install watchdog)"
+        ParagonLabel(nf, text=hint, style="muted", anchor="w").pack(side="left")
+
+        # Action buttons
+        actions = ctk.CTkFrame(main, fg_color="transparent")
+        actions.pack(fill="x", padx=12, pady=(0, 6))
+        self.process_btn = ParagonButton(actions, text="▶ PROCESS ONCE",
+                                         command=self._start_process, width=170, height=40)
+        self.process_btn.pack(side="left", padx=(0, 10))
+        self.monitor_btn = ParagonButton(actions, text="👁 MONITOR",
+                                         command=self._toggle_monitor, width=170, height=40,
+                                         fg_color=ParagonTheme.BG_TERTIARY,
+                                         hover_color=ParagonTheme.BG_HOVER)
+        self.monitor_btn.pack(side="left", padx=(0, 10))
+        self.stop_btn = ParagonSecondaryButton(actions, text="⏹ STOP",
+                                               command=self._request_stop, width=110, height=40)
+        self.stop_btn.pack(side="left")
+        self.stop_btn.configure(state="disabled")
+        ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
+                               width=100, height=40).pack(side="right")
+
+        # Log pane
+        log_frame = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        log_frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
+        ParagonLabel(log_frame, text="Log", style="subheader").pack(anchor="w", padx=12, pady=(8, 2))
+        self.log_box = ctk.CTkTextbox(log_frame, fg_color=ParagonTheme.BG_DARK,
+                                      text_color=ParagonTheme.TEXT_SECONDARY,
+                                      font=ctk.CTkFont(family="Consolas", size=12))
+        self.log_box.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.log_box.configure(state="disabled")
+
+    def _path_row(self, parent, label, value):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=(10, 2))
+        ParagonLabel(row, text=label, style="muted", width=110, anchor="w").pack(side="left")
+        entry = ParagonEntry(row)
+        entry.insert(0, value or "")
+        entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        ParagonSecondaryButton(row, text="Browse", width=90,
+                               command=lambda e=entry, t=label: self._browse(e, t)).pack(side="left")
+        return entry
+
+    def _browse(self, entry, title):
+        folder = filedialog.askdirectory(title=f"Select {title}", parent=self)
+        if folder:
+            entry.delete(0, "end")
+            entry.insert(0, folder)
+
+    # ---- logging (thread-safe via .after) -------------------------------
+    def _log(self, msg):
+        if not self.winfo_exists():
+            return
+        self.after(0, self._append_log, msg)
+
+    def _append_log(self, msg):
+        try:
+            self.log_box.configure(state="normal")
+            self.log_box.insert("end", msg + "\n")
+            self.log_box.see("end")
+            self.log_box.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _set_status(self, text):
+        if self.winfo_exists():
+            self.after(0, lambda: self.status_label.configure(text=text))
+
+    # ---- new-show resolver (runs on worker thread; reads plain values) --
+    def _make_new_show_cb(self, default_genre, channel):
+        def cb(show_key, show_name, suggested_summary, dg):
+            return {"summary": suggested_summary,
+                    "genre": (default_genre or None),
+                    "channel": (channel or None)}
+        return cb
+
+    # ---- actions --------------------------------------------------------
+    def _validate(self):
+        source = self.source_entry.get().strip()
+        dest = self.dest_entry.get().strip()
+        if not source or not os.path.isdir(source):
+            messagebox.showwarning("Invalid Source", "Pick a valid source folder.", parent=self)
+            return None
+        if not dest:
+            messagebox.showwarning("Invalid Destination", "Pick a destination folder.", parent=self)
+            return None
+        return source, dest
+
+    def _busy(self, busy, monitoring=False):
+        self._monitoring = monitoring
+        self.process_btn.configure(state="disabled" if busy else "normal")
+        self.stop_btn.configure(state="normal" if busy else "disabled")
+        self.monitor_btn.configure(
+            text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
+            state="normal" if (monitoring or not busy) else "disabled")
+
+    def _start_process(self):
+        if self._worker and self._worker.is_alive():
+            return
+        v = self._validate()
+        if not v:
+            return
+        source, dest = v
+        self._save_config()
+        default_genre = self.genre_entry.get().strip()
+        channel = self.channel_entry.get().strip()
+        nfo_handling = self.nfo_var.get()
+        self._stop_event.clear()
+        self._busy(True, monitoring=False)
+        self._set_status("Processing...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            try:
+                paragon_harvester.run_harvest(
+                    source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
+                    channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
+                    should_stop=self._stop_event.is_set)
+            except Exception as e:
+                self._log(f"ERROR: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _toggle_monitor(self):
+        if self._monitoring:
+            self._request_stop()
+            return
+        if not paragon_harvester.WATCHDOG_AVAILABLE:
+            messagebox.showwarning("Watchdog Required",
+                                   "Monitor mode needs the watchdog library:\n\n"
+                                   "    pip install watchdog", parent=self)
+            return
+        if self._worker and self._worker.is_alive():
+            return
+        v = self._validate()
+        if not v:
+            return
+        source, dest = v
+        self._save_config()
+        default_genre = self.genre_entry.get().strip()
+        channel = self.channel_entry.get().strip()
+        nfo_handling = self.nfo_var.get()
+        self._stop_event.clear()
+        self._busy(True, monitoring=True)
+        self._set_status("Monitoring...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            try:
+                paragon_harvester.run_monitor(
+                    source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
+                    channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
+                    stop_event=self._stop_event)
+            except Exception as e:
+                self._log(f"ERROR: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _request_stop(self):
+        self._stop_event.set()
+        self._set_status("Stopping...")
+
+    def _on_close(self):
+        self._stop_event.set()
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
 
 
 # =============================================================================
