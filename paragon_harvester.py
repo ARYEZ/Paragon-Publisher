@@ -34,6 +34,9 @@ DESTINATION_FOLDER = "B:\\"
 # None means fall back to per-show channels and otherwise a global search.
 DEFAULT_CHANNEL = None
 
+# yt-dlp availability (used by the downloader). Checked at import time.
+YTDLP_AVAILABLE = shutil.which("yt-dlp") is not None
+
 # ---------------------------------------------------------------------------
 # Logging shim. Every function below calls log(...) instead of print(...), so a
 # host (e.g. the Paragon Publisher GUI) can redirect output to a log pane by
@@ -1177,6 +1180,102 @@ def run_monitor(source_folder, destination_folder, default_genre="", nfo_handlin
         observer.stop()
         observer.join()
         log("Monitor stopped.")
+
+# ---------------------------------------------------------------------------
+# Downloader (yt-dlp). Fetches video/playlist/channel URLs straight into the
+# source folder, laid out as <source>/<Channel>/<Title> [<id>].<ext> so the
+# organize pipeline treats each channel folder as a show and reads the exact
+# YouTube metadata from the embedded [id]. yt-dlp is the same engine that apps
+# like 4K Video Downloader wrap, so this replaces the separate download step.
+# ---------------------------------------------------------------------------
+
+def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv",
+                             archive_file=None):
+    """Construct the yt-dlp argument list for one URL. Factored out so it can be
+    tested without actually downloading. resolution is a max height as a string
+    ('2160'/'1080'/'720') or None for best. container is the merged output
+    container ('mkv' or 'mp4'). archive_file, if given, skips already-downloaded
+    videos (subscription-style 'only new')."""
+    # Save as <source>/<Channel>/<Title> [<id>].<ext>
+    outtmpl = os.path.join(source_folder, "%(uploader)s", "%(title)s [%(id)s].%(ext)s")
+
+    if resolution:
+        fmt = f"bv*[height<={resolution}]+ba/b[height<={resolution}]"
+    else:
+        fmt = "bv*+ba/b"
+
+    cmd = [
+        "yt-dlp",
+        "-f", fmt,
+        "--merge-output-format", container,
+        "-o", outtmpl,
+        "--no-overwrites",
+        "--ignore-errors",       # one bad item shouldn't abort a playlist/channel
+        "--no-progress",         # cleaner line-based log output
+    ]
+    if archive_file:
+        cmd += ["--download-archive", archive_file]
+    cmd.append(url)
+    return cmd
+
+def download_urls(urls, source_folder, resolution=None, container="mkv",
+                  archive_file=None, should_stop=None):
+    """Download each URL (video, playlist, or channel) into source_folder via
+    yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
+    should_stop, if given, is polled to allow cancelling between and during
+    downloads."""
+    if not YTDLP_AVAILABLE:
+        log("ERROR: yt-dlp not found on PATH. Install it: pip install yt-dlp")
+        return (0, 0)
+
+    if isinstance(urls, str):
+        urls = [urls]
+    urls = [u.strip() for u in urls if u and u.strip()]
+    if not urls:
+        log("No URLs to download.")
+        return (0, 0)
+
+    os.makedirs(source_folder, exist_ok=True)
+    ok = fail = 0
+    for url in urls:
+        if should_stop is not None and should_stop():
+            log("Download cancelled.")
+            break
+        log(f"\nDownloading: {url}")
+        cmd = build_ytdlp_download_cmd(url, source_folder, resolution, container, archive_file)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+        except Exception as e:
+            log(f"  Failed to start yt-dlp: {e}")
+            fail += 1
+            continue
+
+        try:
+            for line in proc.stdout:
+                log(line.rstrip())
+                if should_stop is not None and should_stop():
+                    log("  Stop requested - terminating download...")
+                    proc.terminate()
+                    break
+            proc.wait()
+        except Exception as e:
+            log(f"  Download error: {e}")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        if proc.returncode == 0:
+            ok += 1
+        else:
+            # --ignore-errors can still yield a non-zero code on partial channel
+            # failures; report it but keep going.
+            fail += 1
+            log(f"  yt-dlp exited with code {proc.returncode} for: {url}")
+
+    log(f"\nDownload finished. {ok} URL(s) ok, {fail} with errors.")
+    return (ok, fail)
 
 def sanitize_existing_nfos(root_folder):
     """Walk a folder and strip 4-byte characters from every .nfo in place.

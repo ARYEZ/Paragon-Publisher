@@ -17205,6 +17205,11 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_genre"] = self.genre_entry.get().strip()
             cfg["harvester_channel"] = self.channel_entry.get().strip()
             cfg["harvester_nfo"] = self.nfo_var.get()
+            cfg["harvester_urls"] = self.url_box.get("1.0", "end").strip()
+            cfg["harvester_resolution"] = self.res_var.get()
+            cfg["harvester_container"] = self.container_var.get()
+            cfg["harvester_skip"] = self.skip_var.get()
+            cfg["harvester_repeat"] = self.repeat_entry.get().strip()
             with open(self.CONFIG_PATH, "w") as f:
                 json.dump(cfg, f)
         except Exception:
@@ -17259,6 +17264,55 @@ class HarvesterDialog(ctk.CTkToplevel):
         if not paragon_harvester.WATCHDOG_AVAILABLE:
             hint += "  (Monitor needs: pip install watchdog)"
         ParagonLabel(nf, text=hint, style="muted", anchor="w").pack(side="left")
+
+        # Download section (yt-dlp)
+        dl = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        dl.pack(fill="x", padx=12, pady=(0, 6))
+        dl_hdr = ctk.CTkFrame(dl, fg_color="transparent")
+        dl_hdr.pack(fill="x", padx=12, pady=(8, 2))
+        ParagonLabel(dl_hdr, text="Download (yt-dlp)", style="subheader").pack(side="left")
+        if not paragon_harvester.YTDLP_AVAILABLE:
+            ParagonLabel(dl_hdr, text="  yt-dlp not found - pip install yt-dlp",
+                         style="muted").pack(side="left")
+
+        ParagonLabel(dl, text="Video / playlist / channel URLs (one per line)",
+                     style="muted", anchor="w").pack(fill="x", padx=12)
+        self.url_box = ctk.CTkTextbox(dl, height=70, fg_color=ParagonTheme.BG_DARK,
+                                      text_color=ParagonTheme.TEXT_PRIMARY,
+                                      font=ctk.CTkFont(family="Consolas", size=12))
+        self.url_box.pack(fill="x", padx=12, pady=(2, 6))
+        if cfg.get("harvester_urls"):
+            self.url_box.insert("1.0", cfg.get("harvester_urls"))
+
+        opt = ctk.CTkFrame(dl, fg_color="transparent")
+        opt.pack(fill="x", padx=12, pady=(0, 6))
+        ParagonLabel(opt, text="Quality", style="muted", anchor="w").pack(side="left")
+        self.res_var = ctk.StringVar(value=cfg.get("harvester_resolution", "Best"))
+        ParagonOptionMenu(opt, values=["Best", "2160", "1080", "720"],
+                          variable=self.res_var, width=90).pack(side="left", padx=(6, 14))
+        ParagonLabel(opt, text="Container", style="muted", anchor="w").pack(side="left")
+        self.container_var = ctk.StringVar(value=cfg.get("harvester_container", "mkv"))
+        ParagonOptionMenu(opt, values=["mkv", "mp4"], variable=self.container_var,
+                          width=80).pack(side="left", padx=(6, 14))
+        self.skip_var = ctk.BooleanVar(value=cfg.get("harvester_skip", True))
+        ParagonCheckbox(opt, text="Skip already downloaded",
+                        variable=self.skip_var).pack(side="left", padx=(0, 14))
+        ParagonLabel(opt, text="Repeat every", style="muted", anchor="w").pack(side="left")
+        self.repeat_entry = ParagonEntry(opt, width=50)
+        self.repeat_entry.insert(0, str(cfg.get("harvester_repeat", "")))
+        self.repeat_entry.pack(side="left", padx=(6, 4))
+        ParagonLabel(opt, text="min (blank = once)", style="muted", anchor="w").pack(side="left")
+
+        dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
+        dl_btns.pack(fill="x", padx=12, pady=(0, 10))
+        self.download_btn = ParagonButton(dl_btns, text="⬇ DOWNLOAD",
+                                          command=lambda: self._start_download(False),
+                                          width=150, height=38)
+        self.download_btn.pack(side="left", padx=(0, 10))
+        self.download_org_btn = ParagonButton(dl_btns, text="⬇ DOWNLOAD + ORGANIZE",
+                                              command=lambda: self._start_download(True),
+                                              width=220, height=38)
+        self.download_org_btn.pack(side="left")
 
         # Action buttons
         actions = ctk.CTkFrame(main, fg_color="transparent")
@@ -17346,7 +17400,10 @@ class HarvesterDialog(ctk.CTkToplevel):
 
     def _busy(self, busy, monitoring=False):
         self._monitoring = monitoring
-        self.process_btn.configure(state="disabled" if busy else "normal")
+        state = "disabled" if busy else "normal"
+        self.process_btn.configure(state=state)
+        self.download_btn.configure(state=state)
+        self.download_org_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -17374,6 +17431,79 @@ class HarvesterDialog(ctk.CTkToplevel):
                     source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                     channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
                     should_stop=self._stop_event.is_set)
+            except Exception as e:
+                self._log(f"ERROR: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _start_download(self, organize):
+        if self._worker and self._worker.is_alive():
+            return
+        if not paragon_harvester.YTDLP_AVAILABLE:
+            messagebox.showwarning("yt-dlp Required",
+                                   "The downloader needs yt-dlp:\n\n    pip install yt-dlp",
+                                   parent=self)
+            return
+        source = self.source_entry.get().strip()
+        if not source:
+            messagebox.showwarning("Invalid Source",
+                                   "Set a source folder to download into.", parent=self)
+            return
+        urls = [u.strip() for u in self.url_box.get("1.0", "end").splitlines() if u.strip()]
+        if not urls:
+            messagebox.showwarning("No URLs", "Enter at least one URL to download.", parent=self)
+            return
+        dest = self.dest_entry.get().strip()
+        if organize and not dest:
+            messagebox.showwarning("Invalid Destination",
+                                   "Set a destination folder to organize into.", parent=self)
+            return
+
+        self._save_config()
+        res = self.res_var.get()
+        resolution = None if res == "Best" else res
+        container = self.container_var.get()
+        archive = os.path.join(source, ".paragon_archive.txt") if self.skip_var.get() else None
+        try:
+            repeat_min = int(self.repeat_entry.get().strip() or "0")
+        except ValueError:
+            repeat_min = 0
+        default_genre = self.genre_entry.get().strip()
+        channel = self.channel_entry.get().strip()
+        nfo_handling = self.nfo_var.get()
+
+        self._stop_event.clear()
+        self._busy(True, monitoring=bool(repeat_min))
+        self._set_status("Downloading..." if not repeat_min else "Downloading (repeating)...")
+
+        def work():
+            import time as _time
+            paragon_harvester.set_logger(self._log)
+            try:
+                while True:
+                    paragon_harvester.download_urls(
+                        urls, source, resolution=resolution, container=container,
+                        archive_file=archive, should_stop=self._stop_event.is_set)
+                    if organize and not self._stop_event.is_set():
+                        self._set_status("Organizing...")
+                        paragon_harvester.run_harvest(
+                            source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
+                            channel=channel,
+                            new_show_cb=self._make_new_show_cb(default_genre, channel),
+                            should_stop=self._stop_event.is_set)
+                    if not repeat_min or self._stop_event.is_set():
+                        break
+                    self._set_status(f"Waiting {repeat_min} min for next run...")
+                    waited = 0
+                    while waited < repeat_min * 60 and not self._stop_event.is_set():
+                        _time.sleep(1)
+                        waited += 1
             except Exception as e:
                 self._log(f"ERROR: {e}")
             finally:
