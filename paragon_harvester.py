@@ -1189,13 +1189,23 @@ def run_monitor(source_folder, destination_folder, default_genre="", nfo_handlin
 # like 4K Video Downloader wrap, so this replaces the separate download step.
 # ---------------------------------------------------------------------------
 
+def is_watch_url(url):
+    """True if url points at a single video (a watch page or youtu.be link),
+    even when it carries a '&list=...' mix/playlist parameter."""
+    u = url.lower()
+    return ("watch?v=" in u) or ("youtu.be/" in u) or ("/shorts/" in u)
+
 def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv",
-                             archive_file=None):
+                             archive_file=None, no_playlist=False,
+                             cookies_from_browser=None):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
     container ('mkv' or 'mp4'). archive_file, if given, skips already-downloaded
-    videos (subscription-style 'only new')."""
+    videos (subscription-style 'only new'). no_playlist forces just the single
+    video (used for watch URLs that carry a '&list=' mix). cookies_from_browser
+    (e.g. 'chrome'/'firefox'/'edge'/'brave') passes browser cookies to work
+    around 'HTTP 403 Forbidden' anti-bot blocks."""
     # Save as <source>/<Channel>/<Title> [<id>].<ext>
     outtmpl = os.path.join(source_folder, "%(uploader)s", "%(title)s [%(id)s].%(ext)s")
 
@@ -1216,17 +1226,24 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         # bar. Prefixed with [PHPROGRESS] so the GUI can recognise and hide it.
         "--progress-template", "download:[PHPROGRESS] %(progress._percent_str)s",
     ]
+    if no_playlist:
+        cmd.append("--no-playlist")
+    if cookies_from_browser:
+        cmd += ["--cookies-from-browser", cookies_from_browser]
     if archive_file:
         cmd += ["--download-archive", archive_file]
     cmd.append(url)
     return cmd
 
 def download_urls(urls, source_folder, resolution=None, container="mkv",
-                  archive_file=None, should_stop=None):
+                  archive_file=None, should_stop=None, whole_playlist=False,
+                  cookies_from_browser=None):
     """Download each URL (video, playlist, or channel) into source_folder via
     yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
     should_stop, if given, is polled to allow cancelling between and during
-    downloads."""
+    downloads. whole_playlist=False makes a watch URL that carries a '&list='
+    grab only the single video (not the whole auto-mix); set True to honour the
+    list. cookies_from_browser works around HTTP 403 anti-bot errors."""
     if not YTDLP_AVAILABLE:
         log("ERROR: yt-dlp not found on PATH. Install it: pip install yt-dlp")
         return (0, 0)
@@ -1245,7 +1262,16 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
             log("Download cancelled.")
             break
         log(f"\nDownloading: {url}")
-        cmd = build_ytdlp_download_cmd(url, source_folder, resolution, container, archive_file)
+        # A watch URL that carries a '&list=' would otherwise pull the whole
+        # (often auto-generated) mix; restrict to the single video unless the
+        # caller explicitly wants the list.
+        no_playlist = is_watch_url(url) and not whole_playlist
+        if no_playlist and "list=" in url.lower():
+            log("  (watch URL with a list - downloading just this video; "
+                "enable 'Whole playlist/channel' to fetch the list)")
+        cmd = build_ytdlp_download_cmd(url, source_folder, resolution, container,
+                                       archive_file, no_playlist=no_playlist,
+                                       cookies_from_browser=cookies_from_browser)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)

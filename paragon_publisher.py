@@ -17323,6 +17323,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_skip"] = self.skip_var.get()
             cfg["harvester_repeat"] = self.repeat_entry.get().strip()
             cfg["harvester_ask_each"] = self.ask_each_var.get()
+            cfg["harvester_whole_playlist"] = self.whole_playlist_var.get()
+            cfg["harvester_cookies"] = self.cookies_var.get()
             cfg["harvester_subscriptions"] = self._subscriptions
             with open(self.CONFIG_PATH, "w") as f:
                 json.dump(cfg, f)
@@ -17419,6 +17421,18 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.repeat_entry.insert(0, str(cfg.get("harvester_repeat", "")))
         self.repeat_entry.pack(side="left", padx=(6, 4))
         ParagonLabel(opt, text="min (blank = once)", style="muted", anchor="w").pack(side="left")
+
+        opt2 = ctk.CTkFrame(dl, fg_color="transparent")
+        opt2.pack(fill="x", padx=12, pady=(0, 6))
+        self.whole_playlist_var = ctk.BooleanVar(value=cfg.get("harvester_whole_playlist", False))
+        ParagonCheckbox(opt2, text="Whole playlist/channel (watch links grab just the video)",
+                        variable=self.whole_playlist_var).pack(side="left", padx=(0, 16))
+        ParagonLabel(opt2, text="Cookies from", style="muted", anchor="w").pack(side="left")
+        self.cookies_var = ctk.StringVar(value=cfg.get("harvester_cookies", "none"))
+        ParagonOptionMenu(opt2, values=["none", "chrome", "firefox", "edge", "brave"],
+                          variable=self.cookies_var, width=110).pack(side="left", padx=(6, 6))
+        ParagonLabel(opt2, text="(fixes most HTTP 403 errors)",
+                     style="muted", anchor="w").pack(side="left")
 
         dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
         dl_btns.pack(fill="x", padx=12, pady=(0, 6))
@@ -17653,6 +17667,9 @@ class HarvesterDialog(ctk.CTkToplevel):
         container = self.container_var.get()
         use_archive = force_archive or self.skip_var.get()
         archive = os.path.join(source, ".paragon_archive.txt") if use_archive else None
+        whole_playlist = self.whole_playlist_var.get()
+        cookies = self.cookies_var.get()
+        cookies_from_browser = None if cookies == "none" else cookies
         try:
             repeat_min = int(self.repeat_entry.get().strip() or "0")
         except ValueError:
@@ -17674,7 +17691,9 @@ class HarvesterDialog(ctk.CTkToplevel):
                 while True:
                     paragon_harvester.download_urls(
                         urls, source, resolution=resolution, container=container,
-                        archive_file=archive, should_stop=self._stop_event.is_set)
+                        archive_file=archive, should_stop=self._stop_event.is_set,
+                        whole_playlist=whole_playlist,
+                        cookies_from_browser=cookies_from_browser)
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")
                         paragon_harvester.run_harvest(
