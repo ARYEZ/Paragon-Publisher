@@ -1211,7 +1211,10 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         "-o", outtmpl,
         "--no-overwrites",
         "--ignore-errors",       # one bad item shouldn't abort a playlist/channel
-        "--no-progress",         # cleaner line-based log output
+        "--newline",             # one progress update per line (parseable)
+        # Emit a machine-readable percent line a host can turn into a progress
+        # bar. Prefixed with [PHPROGRESS] so the GUI can recognise and hide it.
+        "--progress-template", "download:[PHPROGRESS] %(progress._percent_str)s",
     ]
     if archive_file:
         cmd += ["--download-archive", archive_file]

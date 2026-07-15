@@ -17157,6 +17157,117 @@ MusicBrainz Album Lookup:
 # PARAGON HARVESTER DIALOG
 # =============================================================================
 
+class NewShowDialog(ctk.CTkToplevel):
+    """Modal editor shown (optionally) the first time a show is seen, so its
+    summary/genre/channel can be reviewed before saving. Sets self.result to a
+    dict on Save, or leaves it None to accept the harvester's defaults."""
+
+    def __init__(self, parent, show_key, show_name, suggested_summary,
+                 default_genre, default_channel):
+        super().__init__(parent)
+        self.result = None
+        self.title("New Show")
+        self.geometry("560x470")
+        self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.transient(parent)
+
+        wrap = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
+        wrap.pack(fill="both", expand=True, padx=16, pady=16)
+        ParagonLabel(wrap, text=f"🌱 New show: {show_key}", style="header").pack(anchor="w")
+        ParagonLabel(wrap, text="Review metadata before it's saved.",
+                     style="muted").pack(anchor="w", pady=(0, 10))
+
+        ParagonLabel(wrap, text="Summary", style="muted", anchor="w").pack(fill="x")
+        self.summary_box = ctk.CTkTextbox(wrap, height=150, fg_color=ParagonTheme.BG_TERTIARY,
+                                          text_color=ParagonTheme.TEXT_PRIMARY)
+        self.summary_box.pack(fill="x", pady=(2, 10))
+        self.summary_box.insert("1.0", suggested_summary or "")
+
+        gr = ctk.CTkFrame(wrap, fg_color="transparent")
+        gr.pack(fill="x", pady=(0, 8))
+        ParagonLabel(gr, text="Genre", style="muted", width=80, anchor="w").pack(side="left")
+        self.genre_entry = ParagonEntry(gr)
+        self.genre_entry.insert(0, default_genre or "")
+        self.genre_entry.pack(side="left", fill="x", expand=True)
+
+        cr = ctk.CTkFrame(wrap, fg_color="transparent")
+        cr.pack(fill="x", pady=(0, 14))
+        ParagonLabel(cr, text="Channel", style="muted", width=80, anchor="w").pack(side="left")
+        self.channel_entry = ParagonEntry(cr)
+        self.channel_entry.insert(0, default_channel or "")
+        self.channel_entry.pack(side="left", fill="x", expand=True)
+
+        btns = ctk.CTkFrame(wrap, fg_color="transparent")
+        btns.pack(fill="x")
+        ParagonButton(btns, text="SAVE", command=self._save, width=120).pack(side="right", padx=(10, 0))
+        ParagonSecondaryButton(btns, text="USE DEFAULTS", command=self._defaults,
+                               width=140).pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._defaults)
+        self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
+
+    def _save(self):
+        self.result = {
+            "summary": self.summary_box.get("1.0", "end").strip(),
+            "genre": self.genre_entry.get().strip() or None,
+            "channel": self.channel_entry.get().strip() or None,
+        }
+        self._close()
+
+    def _defaults(self):
+        self.result = None
+        self._close()
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
+
+
+class SubscriptionsDialog(ctk.CTkToplevel):
+    """Manage the saved channel-subscription list (one URL per line)."""
+
+    def __init__(self, parent, subs, on_save):
+        super().__init__(parent)
+        self._on_save = on_save
+        self.title("Subscriptions")
+        self.geometry("620x460")
+        self.configure(fg_color=ParagonTheme.BG_DARK)
+        self.transient(parent)
+
+        wrap = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
+        wrap.pack(fill="both", expand=True, padx=16, pady=16)
+        ParagonLabel(wrap, text="⭐ Channel Subscriptions", style="header").pack(anchor="w")
+        ParagonLabel(wrap, text="One channel URL or @handle per line. 'Pull New (Subs)' "
+                     "downloads only new uploads from all of them.",
+                     style="muted", anchor="w").pack(fill="x", pady=(0, 10))
+
+        self.box = ctk.CTkTextbox(wrap, fg_color=ParagonTheme.BG_TERTIARY,
+                                  text_color=ParagonTheme.TEXT_PRIMARY,
+                                  font=ctk.CTkFont(family="Consolas", size=12))
+        self.box.pack(fill="both", expand=True)
+        self.box.insert("1.0", "\n".join(subs))
+
+        btns = ctk.CTkFrame(wrap, fg_color="transparent")
+        btns.pack(fill="x", pady=(12, 0))
+        ParagonButton(btns, text="SAVE", command=self._save, width=120).pack(side="right", padx=(10, 0))
+        ParagonSecondaryButton(btns, text="CANCEL", command=self.destroy,
+                               width=120).pack(side="right")
+        self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
+
+    def _save(self):
+        subs = [ln.strip() for ln in self.box.get("1.0", "end").splitlines() if ln.strip()]
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        if self._on_save:
+            self._on_save(subs)
+        self.destroy()
+
+
 class HarvesterDialog(ctk.CTkToplevel):
     """GUI front-end for paragon_harvester: organize a folder of videos into
     Kodi show folders (with NFOs) in one pass, or monitor a folder for new
@@ -17178,6 +17289,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._stop_event = threading.Event()
 
         cfg = self._load_config()
+        self._subscriptions = cfg.get("harvester_subscriptions", []) or []
 
         self._create_ui(cfg)
 
@@ -17210,6 +17322,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_container"] = self.container_var.get()
             cfg["harvester_skip"] = self.skip_var.get()
             cfg["harvester_repeat"] = self.repeat_entry.get().strip()
+            cfg["harvester_ask_each"] = self.ask_each_var.get()
+            cfg["harvester_subscriptions"] = self._subscriptions
             with open(self.CONFIG_PATH, "w") as f:
                 json.dump(cfg, f)
         except Exception:
@@ -17260,6 +17374,9 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.nfo_var = ctk.StringVar(value=cfg.get("harvester_nfo", "skip"))
         ParagonOptionMenu(nf, values=["skip", "overwrite"], variable=self.nfo_var,
                           width=140).pack(side="left", padx=(6, 16))
+        self.ask_each_var = ctk.BooleanVar(value=cfg.get("harvester_ask_each", False))
+        ParagonCheckbox(nf, text="Ask for each new show",
+                        variable=self.ask_each_var).pack(side="left", padx=(0, 16))
         hint = "yt-dlp + ffmpeg add richer metadata when installed."
         if not paragon_harvester.WATCHDOG_AVAILABLE:
             hint += "  (Monitor needs: pip install watchdog)"
@@ -17304,7 +17421,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         ParagonLabel(opt, text="min (blank = once)", style="muted", anchor="w").pack(side="left")
 
         dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
-        dl_btns.pack(fill="x", padx=12, pady=(0, 10))
+        dl_btns.pack(fill="x", padx=12, pady=(0, 6))
         self.download_btn = ParagonButton(dl_btns, text="⬇ DOWNLOAD",
                                           command=lambda: self._start_download(False),
                                           width=150, height=38)
@@ -17313,6 +17430,25 @@ class HarvesterDialog(ctk.CTkToplevel):
                                               command=lambda: self._start_download(True),
                                               width=220, height=38)
         self.download_org_btn.pack(side="left")
+        self.subs_btn = ParagonSecondaryButton(dl_btns, text="⭐ SUBSCRIPTIONS",
+                                               command=self._manage_subscriptions,
+                                               width=170, height=38)
+        self.subs_btn.pack(side="right")
+        self.pull_subs_btn = ParagonButton(dl_btns, text="⬇ PULL NEW (SUBS)",
+                                           command=self._pull_subscriptions,
+                                           width=180, height=38,
+                                           fg_color=ParagonTheme.BG_TERTIARY,
+                                           hover_color=ParagonTheme.BG_HOVER)
+        self.pull_subs_btn.pack(side="right", padx=(0, 10))
+
+        # Progress bar (driven by yt-dlp percent lines)
+        prog = ctk.CTkFrame(dl, fg_color="transparent")
+        prog.pack(fill="x", padx=12, pady=(0, 10))
+        self.progress_bar = ParagonProgressBar(prog)
+        self.progress_bar.set(0)
+        self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.progress_label = ParagonLabel(prog, text="0%", style="muted", width=48, anchor="e")
+        self.progress_label.pack(side="left")
 
         # Action buttons
         actions = ctk.CTkFrame(main, fg_color="transparent")
@@ -17363,7 +17499,22 @@ class HarvesterDialog(ctk.CTkToplevel):
     def _log(self, msg):
         if not self.winfo_exists():
             return
-        self.after(0, self._append_log, msg)
+        self.after(0, self._handle_line, msg)
+
+    def _handle_line(self, msg):
+        # Progress lines (emitted by yt-dlp via --progress-template) drive the
+        # bar and are kept out of the log to avoid flooding it.
+        if "[PHPROGRESS]" in msg:
+            m = re.search(r'([\d.]+)%', msg)
+            if m:
+                try:
+                    pct = float(m.group(1))
+                    self.progress_bar.set(max(0.0, min(1.0, pct / 100.0)))
+                    self.progress_label.configure(text=f"{int(pct)}%")
+                except Exception:
+                    pass
+            return
+        self._append_log(msg)
 
     def _append_log(self, msg):
         try:
@@ -17374,16 +17525,45 @@ class HarvesterDialog(ctk.CTkToplevel):
         except Exception:
             pass
 
+    def _reset_progress(self):
+        if self.winfo_exists():
+            self.after(0, lambda: (self.progress_bar.set(0),
+                                   self.progress_label.configure(text="0%")))
+
     def _set_status(self, text):
         if self.winfo_exists():
             self.after(0, lambda: self.status_label.configure(text=text))
 
     # ---- new-show resolver (runs on worker thread; reads plain values) --
     def _make_new_show_cb(self, default_genre, channel):
+        # Captured on the main thread when the action starts (tk vars must not
+        # be read from the worker thread).
+        ask_each = getattr(self, "_ask_each_pending", False)
         def cb(show_key, show_name, suggested_summary, dg):
-            return {"summary": suggested_summary,
-                    "genre": (default_genre or None),
-                    "channel": (channel or None)}
+            defaults = {"summary": suggested_summary,
+                        "genre": (default_genre or None),
+                        "channel": (channel or None)}
+            if not ask_each or not self.winfo_exists():
+                return defaults
+            # Marshal a modal edit dialog onto the main thread and block this
+            # worker thread until the user answers.
+            holder = {}
+            done = threading.Event()
+
+            def show():
+                try:
+                    dlg = NewShowDialog(self, show_key, show_name, suggested_summary,
+                                        default_genre or "", channel or "")
+                    self.wait_window(dlg)
+                    holder["result"] = dlg.result
+                except Exception:
+                    holder["result"] = None
+                finally:
+                    done.set()
+
+            self.after(0, show)
+            done.wait()
+            return holder.get("result") or defaults
         return cb
 
     # ---- actions --------------------------------------------------------
@@ -17420,6 +17600,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         default_genre = self.genre_entry.get().strip()
         channel = self.channel_entry.get().strip()
         nfo_handling = self.nfo_var.get()
+        self._ask_each_pending = self.ask_each_var.get()
         self._stop_event.clear()
         self._busy(True, monitoring=False)
         self._set_status("Processing...")
@@ -17442,7 +17623,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
-    def _start_download(self, organize):
+    def _start_download(self, organize, urls=None, force_archive=False):
         if self._worker and self._worker.is_alive():
             return
         if not paragon_harvester.YTDLP_AVAILABLE:
@@ -17455,7 +17636,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             messagebox.showwarning("Invalid Source",
                                    "Set a source folder to download into.", parent=self)
             return
-        urls = [u.strip() for u in self.url_box.get("1.0", "end").splitlines() if u.strip()]
+        if urls is None:
+            urls = [u.strip() for u in self.url_box.get("1.0", "end").splitlines() if u.strip()]
         if not urls:
             messagebox.showwarning("No URLs", "Enter at least one URL to download.", parent=self)
             return
@@ -17469,7 +17651,8 @@ class HarvesterDialog(ctk.CTkToplevel):
         res = self.res_var.get()
         resolution = None if res == "Best" else res
         container = self.container_var.get()
-        archive = os.path.join(source, ".paragon_archive.txt") if self.skip_var.get() else None
+        use_archive = force_archive or self.skip_var.get()
+        archive = os.path.join(source, ".paragon_archive.txt") if use_archive else None
         try:
             repeat_min = int(self.repeat_entry.get().strip() or "0")
         except ValueError:
@@ -17477,8 +17660,10 @@ class HarvesterDialog(ctk.CTkToplevel):
         default_genre = self.genre_entry.get().strip()
         channel = self.channel_entry.get().strip()
         nfo_handling = self.nfo_var.get()
+        self._ask_each_pending = self.ask_each_var.get()
 
         self._stop_event.clear()
+        self._reset_progress()
         self._busy(True, monitoring=bool(repeat_min))
         self._set_status("Downloading..." if not repeat_min else "Downloading (repeating)...")
 
@@ -17515,6 +17700,21 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
+    def _manage_subscriptions(self):
+        def on_save(subs):
+            self._subscriptions = subs
+            self._save_config()
+            self._append_log(f"Saved {len(subs)} subscription(s).")
+        SubscriptionsDialog(self, list(self._subscriptions), on_save)
+
+    def _pull_subscriptions(self):
+        if not self._subscriptions:
+            messagebox.showinfo("No Subscriptions",
+                                "Add channel URLs first via ⭐ SUBSCRIPTIONS.", parent=self)
+            return
+        # Pull only-new (force the archive on) and organize in one pass.
+        self._start_download(True, urls=list(self._subscriptions), force_archive=True)
+
     def _toggle_monitor(self):
         if self._monitoring:
             self._request_stop()
@@ -17534,6 +17734,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         default_genre = self.genre_entry.get().strip()
         channel = self.channel_entry.get().strip()
         nfo_handling = self.nfo_var.get()
+        self._ask_each_pending = self.ask_each_var.get()
         self._stop_event.clear()
         self._busy(True, monitoring=True)
         self._set_status("Monitoring...")
