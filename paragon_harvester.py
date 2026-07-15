@@ -1189,19 +1189,46 @@ def run_monitor(source_folder, destination_folder, default_genre="", nfo_handlin
 # like 4K Video Downloader wrap, so this replaces the separate download step.
 # ---------------------------------------------------------------------------
 
-def check_environment():
-    """Report on the external tools the downloader relies on. Returns a dict:
-        yt_dlp:     version string, or None if not found
-        ffmpeg:     True/False (needed to merge separate video+audio streams)
-        js_runtime: 'deno'/'node'/'bun' if one is on PATH, else None
-    A missing JS runtime is the usual reason downloads come back audio-only or
-    403: YouTube needs JS run to hand over the video stream."""
-    info = {"yt_dlp": None, "ffmpeg": shutil.which("ffmpeg") is not None,
-            "js_runtime": None}
+def detect_js_runtime():
+    """Find a JavaScript runtime for yt-dlp. Returns (name, path):
+        name: 'deno'/'node'/'bun', or None if none found
+        path: full path to the executable if it was found OFF the PATH (so it
+              must be passed to yt-dlp explicitly), or None if it's on the PATH
+              already. Deno installed via winget frequently ends up off the
+              PATH of an already-running process, which is why we also probe
+              its common install locations."""
     for rt in ("deno", "node", "bun"):
         if shutil.which(rt):
-            info["js_runtime"] = rt
-            break
+            return (rt, None)
+
+    # Not on PATH - probe common Windows locations for deno.exe.
+    import glob
+    home = os.path.expanduser("~")
+    local = os.environ.get("LOCALAPPDATA", os.path.join(home, "AppData", "Local"))
+    candidates = [
+        os.path.join(home, ".deno", "bin", "deno.exe"),
+        os.path.join(local, "Microsoft", "WinGet", "Links", "deno.exe"),
+        os.path.join(local, "deno", "deno.exe"),
+    ]
+    candidates += glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages",
+                                         "DenoLand.Deno*", "**", "deno.exe"),
+                            recursive=True)
+    for c in candidates:
+        if os.path.isfile(c):
+            return ("deno", c)
+    return (None, None)
+
+def check_environment():
+    """Report on the external tools the downloader relies on. Returns a dict:
+        yt_dlp:          version string, or None if not found
+        ffmpeg:          True/False (needed to merge video+audio streams)
+        js_runtime:      'deno'/'node'/'bun' if found, else None
+        js_runtime_path: full path if found off-PATH, else None
+    A missing JS runtime is the usual reason downloads come back audio-only or
+    403: YouTube needs JS run to hand over the video stream."""
+    rt_name, rt_path = detect_js_runtime()
+    info = {"yt_dlp": None, "ffmpeg": shutil.which("ffmpeg") is not None,
+            "js_runtime": rt_name, "js_runtime_path": rt_path}
     if shutil.which("yt-dlp"):
         try:
             out = subprocess.run(["yt-dlp", "--version"], capture_output=True,
@@ -1220,7 +1247,8 @@ def is_watch_url(url):
 
 def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv",
                              archive_file=None, no_playlist=False,
-                             cookies_from_browser=None, js_runtime=None):
+                             cookies_from_browser=None, js_runtime=None,
+                             js_runtime_path=None):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
@@ -1251,9 +1279,12 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
     ]
     if no_playlist:
         cmd.append("--no-playlist")
-    # yt-dlp only auto-uses Deno; tell it to use Node/Bun if that's what's here,
-    # otherwise YouTube extraction without JS often yields audio-only or 403.
-    if js_runtime in ("node", "bun"):
+    # yt-dlp only auto-uses Deno when it's on PATH. Tell it explicitly about
+    # Node/Bun, or about a Deno found off-PATH (with its full path), otherwise
+    # YouTube extraction without JS often yields audio-only or 403.
+    if js_runtime and js_runtime_path:
+        cmd += ["--js-runtimes", f"{js_runtime}:{js_runtime_path}"]
+    elif js_runtime in ("node", "bun"):
         cmd += ["--js-runtimes", js_runtime]
     if cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
@@ -1284,16 +1315,14 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
 
     os.makedirs(source_folder, exist_ok=True)
 
-    # Detect a JS runtime once. yt-dlp uses Deno automatically but needs to be
-    # told about Node/Bun explicitly, so surface that here.
-    js_runtime = None
-    for rt in ("deno", "node", "bun"):
-        if shutil.which(rt):
-            js_runtime = rt
-            break
+    # Detect a JS runtime once. yt-dlp only auto-uses Deno on PATH; Node/Bun or
+    # an off-PATH Deno must be passed explicitly (see detect_js_runtime).
+    js_runtime, js_runtime_path = detect_js_runtime()
     if js_runtime is None:
         log("WARNING: no JS runtime (deno/node/bun) found - YouTube may return "
             "audio-only or HTTP 403. Install Deno: winget install DenoLand.Deno")
+    elif js_runtime_path:
+        log(f"Using JS runtime: {js_runtime} (found off-PATH at {js_runtime_path})")
     elif js_runtime != "deno":
         log(f"Using JS runtime: {js_runtime}")
 
@@ -1313,7 +1342,8 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
         cmd = build_ytdlp_download_cmd(url, source_folder, resolution, container,
                                        archive_file, no_playlist=no_playlist,
                                        cookies_from_browser=cookies_from_browser,
-                                       js_runtime=js_runtime)
+                                       js_runtime=js_runtime,
+                                       js_runtime_path=js_runtime_path)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)

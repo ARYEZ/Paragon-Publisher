@@ -17584,8 +17584,11 @@ class HarvesterDialog(ctk.CTkToplevel):
             self._append_log("--- Tool check ---")
             self._append_log(f"  yt-dlp:     {info['yt_dlp'] or 'NOT FOUND  (pip install -U yt-dlp)'}")
             self._append_log(f"  ffmpeg:     {'found' if info['ffmpeg'] else 'NOT FOUND  (needed to merge video+audio)'}")
-            self._append_log(f"  JS runtime: {info['js_runtime'] or 'NONE  (install Deno: winget install DenoLand.Deno)'}")
-            if not info["js_runtime"]:
+            if info["js_runtime"]:
+                loc = f" (off-PATH: {info.get('js_runtime_path')})" if info.get("js_runtime_path") else " (on PATH)"
+                self._append_log(f"  JS runtime: {info['js_runtime']}{loc}")
+            else:
+                self._append_log("  JS runtime: NONE  (install Deno: winget install DenoLand.Deno)")
                 self._append_log("  -> Without a JS runtime YouTube often returns AUDIO ONLY or HTTP 403.")
             if not info["ffmpeg"]:
                 self._append_log("  -> Without ffmpeg, video+audio can't be merged into one file.")
