@@ -17328,6 +17328,7 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_ask_each"] = self.ask_each_var.get()
             cfg["harvester_whole_playlist"] = self.whole_playlist_var.get()
             cfg["harvester_cookies"] = self.cookies_var.get()
+            cfg["harvester_codec"] = self.codec_var.get()
             cfg["harvester_subscriptions"] = self._subscriptions
             with open(self.CONFIG_PATH, "w") as f:
                 json.dump(cfg, f)
@@ -17432,11 +17433,15 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.whole_playlist_var = ctk.BooleanVar(value=cfg.get("harvester_whole_playlist", False))
         ParagonCheckbox(opt2, text="Whole playlist/channel (watch links grab just the video)",
                         variable=self.whole_playlist_var).pack(side="left", padx=(0, 16))
+        ParagonLabel(opt2, text="Video codec", style="muted", anchor="w").pack(side="left")
+        self.codec_var = ctk.StringVar(value=cfg.get("harvester_codec", "H.264 (compatible)"))
+        ParagonOptionMenu(opt2, values=["H.264 (compatible)", "Any (AV1/VP9, smaller)"],
+                          variable=self.codec_var, width=190).pack(side="left", padx=(6, 14))
         ParagonLabel(opt2, text="Cookies from", style="muted", anchor="w").pack(side="left")
         self.cookies_var = ctk.StringVar(value=cfg.get("harvester_cookies", "none"))
         ParagonOptionMenu(opt2, values=["none", "chrome", "firefox", "edge", "brave"],
                           variable=self.cookies_var, width=110).pack(side="left", padx=(6, 6))
-        ParagonLabel(opt2, text="(fixes most HTTP 403 errors)",
+        ParagonLabel(opt2, text="(403 fix)",
                      style="muted", anchor="w").pack(side="left")
 
         dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
@@ -17715,6 +17720,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         whole_playlist = self.whole_playlist_var.get()
         cookies = self.cookies_var.get()
         cookies_from_browser = None if cookies == "none" else cookies
+        prefer_h264 = self.codec_var.get().startswith("H.264")
         try:
             repeat_min = int(self.repeat_entry.get().strip() or "0")
         except ValueError:
@@ -17738,7 +17744,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                         urls, source, resolution=resolution, container=container,
                         archive_file=archive, should_stop=self._stop_event.is_set,
                         whole_playlist=whole_playlist,
-                        cookies_from_browser=cookies_from_browser)
+                        cookies_from_browser=cookies_from_browser,
+                        prefer_h264=prefer_h264)
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")
                         paragon_harvester.run_harvest(

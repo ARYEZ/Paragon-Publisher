@@ -1248,7 +1248,7 @@ def is_watch_url(url):
 def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv",
                              archive_file=None, no_playlist=False,
                              cookies_from_browser=None, js_runtime=None,
-                             js_runtime_path=None):
+                             js_runtime_path=None, prefer_h264=True):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
@@ -1268,6 +1268,14 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
     cmd = [
         "yt-dlp",
         "-f", fmt,
+    ]
+    # Prefer H.264 (avc1) video and AAC audio. YouTube's high formats are often
+    # AV1 (itags 399/400/401), which many players and Kodi hardware decoders
+    # can't render -> audio plays but the picture is black. H.264 is universally
+    # compatible. Falls back to whatever's available if H.264 isn't offered.
+    if prefer_h264:
+        cmd += ["-S", "vcodec:h264,res,acodec:aac"]
+    cmd += [
         "--merge-output-format", container,
         "-o", outtmpl,
         "--no-overwrites",
@@ -1295,7 +1303,7 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
 
 def download_urls(urls, source_folder, resolution=None, container="mkv",
                   archive_file=None, should_stop=None, whole_playlist=False,
-                  cookies_from_browser=None):
+                  cookies_from_browser=None, prefer_h264=True):
     """Download each URL (video, playlist, or channel) into source_folder via
     yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
     should_stop, if given, is polled to allow cancelling between and during
@@ -1343,7 +1351,8 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                                        archive_file, no_playlist=no_playlist,
                                        cookies_from_browser=cookies_from_browser,
                                        js_runtime=js_runtime,
-                                       js_runtime_path=js_runtime_path)
+                                       js_runtime_path=js_runtime_path,
+                                       prefer_h264=prefer_h264)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)
