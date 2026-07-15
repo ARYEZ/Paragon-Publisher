@@ -17295,6 +17295,9 @@ class HarvesterDialog(ctk.CTkToplevel):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
+        # Quietly check external tools shortly after opening so the banner warns
+        # about a missing yt-dlp / ffmpeg / JS runtime up front.
+        self.after(300, lambda: self._run_env_check(verbose=False))
 
     # ---- config ---------------------------------------------------------
     def _load_config(self):
@@ -17390,9 +17393,11 @@ class HarvesterDialog(ctk.CTkToplevel):
         dl_hdr = ctk.CTkFrame(dl, fg_color="transparent")
         dl_hdr.pack(fill="x", padx=12, pady=(8, 2))
         ParagonLabel(dl_hdr, text="Download (yt-dlp)", style="subheader").pack(side="left")
-        if not paragon_harvester.YTDLP_AVAILABLE:
-            ParagonLabel(dl_hdr, text="  yt-dlp not found - pip install yt-dlp",
-                         style="muted").pack(side="left")
+        ParagonSecondaryButton(dl_hdr, text="🔧 CHECK TOOLS", width=140, height=28,
+                               command=self._check_tools).pack(side="right")
+        self.env_warning = ctk.CTkLabel(dl_hdr, text="", text_color=ParagonTheme.WARNING,
+                                        font=ctk.CTkFont(size=12), anchor="w")
+        self.env_warning.pack(side="left", padx=(10, 0))
 
         ParagonLabel(dl, text="Video / playlist / channel URLs (one per line)",
                      style="muted", anchor="w").pack(fill="x", padx=12)
@@ -17547,6 +17552,43 @@ class HarvesterDialog(ctk.CTkToplevel):
     def _set_status(self, text):
         if self.winfo_exists():
             self.after(0, lambda: self.status_label.configure(text=text))
+
+    # ---- external-tool check --------------------------------------------
+    def _check_tools(self):
+        self._run_env_check(verbose=True)
+
+    def _run_env_check(self, verbose):
+        def work():
+            info = paragon_harvester.check_environment()
+            if self.winfo_exists():
+                self.after(0, lambda: self._apply_env_check(info, verbose))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_env_check(self, info, verbose):
+        if not self.winfo_exists():
+            return
+        warns = []
+        if not info["yt_dlp"]:
+            warns.append("yt-dlp missing")
+        if not info["ffmpeg"]:
+            warns.append("ffmpeg missing")
+        if not info["js_runtime"]:
+            warns.append("no JS runtime (audio-only/403 likely)")
+        if warns:
+            self.env_warning.configure(text="  ⚠ " + " · ".join(warns),
+                                       text_color=ParagonTheme.WARNING)
+        else:
+            self.env_warning.configure(text="  ✓ tools OK",
+                                       text_color=ParagonTheme.SUCCESS)
+        if verbose:
+            self._append_log("--- Tool check ---")
+            self._append_log(f"  yt-dlp:     {info['yt_dlp'] or 'NOT FOUND  (pip install -U yt-dlp)'}")
+            self._append_log(f"  ffmpeg:     {'found' if info['ffmpeg'] else 'NOT FOUND  (needed to merge video+audio)'}")
+            self._append_log(f"  JS runtime: {info['js_runtime'] or 'NONE  (install Deno: winget install DenoLand.Deno)'}")
+            if not info["js_runtime"]:
+                self._append_log("  -> Without a JS runtime YouTube often returns AUDIO ONLY or HTTP 403.")
+            if not info["ffmpeg"]:
+                self._append_log("  -> Without ffmpeg, video+audio can't be merged into one file.")
 
     # ---- new-show resolver (runs on worker thread; reads plain values) --
     def _make_new_show_cb(self, default_genre, channel):
