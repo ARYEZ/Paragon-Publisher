@@ -17157,6 +17157,82 @@ MusicBrainz Album Lookup:
 # PARAGON HARVESTER DIALOG
 # =============================================================================
 
+class ParagonBanner(ctk.CTkFrame):
+    """Branded header for the Harvester page: black with red->orange diagonal
+    streaks (the Paragon TV motif) and a bottom gradient rule. If a banner image
+    file is present it is used instead of the drawn streaks. All drawing is
+    defensive - any failure falls back to a plain title so the dialog is never
+    broken by the banner."""
+
+    # Deep Paragon red (from skin.paragon) fading up into the orange accent.
+    RED = "#ce2221"
+    RED_BRIGHT = "#ff2b52"
+    ORANGE = "#ff6a00"
+
+    def __init__(self, master, title="PARAGON HARVESTER", subtitle="",
+                 height=130, image_path=None, **kwargs):
+        super().__init__(master, fg_color=ParagonTheme.BG_DARK, height=height, **kwargs)
+        self.pack_propagate(False)
+        self._title = title
+        self._subtitle = subtitle
+        self._image_path = image_path
+        self._photo = None
+        self.canvas = tk.Canvas(self, bg=ParagonTheme.BG_DARK, highlightthickness=0, bd=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<Configure>", lambda e: self._draw())
+
+    @staticmethod
+    def _lerp(c1, c2, t):
+        a = tuple(int(c1[i:i + 2], 16) for i in (1, 3, 5))
+        b = tuple(int(c2[i:i + 2], 16) for i in (1, 3, 5))
+        return "#%02x%02x%02x" % tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+    def _draw(self):
+        try:
+            c = self.canvas
+            c.delete("all")
+            w = c.winfo_width(); h = c.winfo_height()
+            if w < 4 or h < 4:
+                return
+            drew_image = False
+            if self._image_path and os.path.isfile(self._image_path) and HAS_PIL:
+                try:
+                    img = Image.open(self._image_path).resize((w, h))
+                    self._photo = ImageTk.PhotoImage(img)
+                    c.create_image(0, 0, anchor="nw", image=self._photo)
+                    drew_image = True
+                except Exception:
+                    drew_image = False
+            if not drew_image:
+                self._draw_streaks(c, w, h)
+            # Title + subtitle, centered.
+            c.create_text(w // 2, h // 2 - (10 if self._subtitle else 0),
+                          text=self._title, fill=ParagonTheme.TEXT_PRIMARY,
+                          font=("Bebas Neue", 40))
+            if self._subtitle:
+                c.create_text(w // 2, h // 2 + 22, text=self._subtitle,
+                              fill=ParagonTheme.TEXT_SECONDARY, font=("Segoe UI", 11))
+            # Bottom gradient rule (red -> orange).
+            for x in range(0, w, 2):
+                col = self._lerp(self.RED_BRIGHT, self.ORANGE, x / max(1, w))
+                c.create_line(x, h - 3, x, h, fill=col, width=2)
+        except Exception:
+            pass
+
+    def _draw_streaks(self, c, w, h):
+        slant = int(h * 0.55)
+        # width, horizontal offset within the cluster
+        specs = [(16, -46), (9, -14), (11, 18), (6, 46)]
+        def cluster(cx):
+            for i, (wd, off) in enumerate(specs):
+                col = self._lerp(self.RED_BRIGHT, self.ORANGE, i / (len(specs) - 1))
+                x = cx + off
+                c.create_line(x + slant, 6, x - slant, h - 6,
+                              fill=col, width=wd, capstyle="round")
+        cluster(int(w * 0.15))
+        cluster(int(w * 0.85))
+
+
 class NewShowDialog(ctk.CTkToplevel):
     """Modal editor shown (optionally) the first time a show is seen, so its
     summary/genre/channel can be reviewed before saving. Sets self.result to a
@@ -17347,19 +17423,35 @@ class HarvesterDialog(ctk.CTkToplevel):
         main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
         main.pack(fill="both", expand=True)
 
-        # Header
-        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=70)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        header_inner = ctk.CTkFrame(header, fg_color="transparent")
-        header_inner.pack(fill="both", expand=True, padx=20, pady=12)
-        ctk.CTkLabel(header_inner, text="🌾 PARAGON HARVESTER",
-                     font=ctk.CTkFont(family="Bebas Neue", size=34),
-                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        self.status_label = ctk.CTkLabel(header_inner, text="Idle",
-                                         text_color=ParagonTheme.TEXT_SECONDARY,
-                                         font=ctk.CTkFont(size=15))
-        self.status_label.pack(side="right")
+        # Branded banner header (drops in paragon_banner.png next to the script
+        # if present, otherwise draws the red->orange diagonal streaks).
+        try:
+            banner_img = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "paragon_banner.png")
+        except Exception:
+            banner_img = None
+        try:
+            banner = ParagonBanner(main, title="PARAGON HARVESTER",
+                                   subtitle="Download  •  Organize  •  Publish to Kodi",
+                                   height=130, image_path=banner_img)
+            banner.pack(fill="x")
+            self.status_label = ctk.CTkLabel(banner, text="Idle",
+                                             fg_color=ParagonTheme.BG_DARK,
+                                             text_color=ParagonTheme.TEXT_SECONDARY,
+                                             font=ctk.CTkFont(size=14))
+            self.status_label.place(relx=0.985, rely=0.16, anchor="e")
+        except Exception:
+            # Fallback to a plain header if the banner can't be built.
+            header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=70)
+            header.pack(fill="x")
+            header.pack_propagate(False)
+            ctk.CTkLabel(header, text="🌾 PARAGON HARVESTER",
+                         font=ctk.CTkFont(family="Bebas Neue", size=34),
+                         text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left", padx=20, pady=12)
+            self.status_label = ctk.CTkLabel(header, text="Idle",
+                                             text_color=ParagonTheme.TEXT_SECONDARY,
+                                             font=ctk.CTkFont(size=15))
+            self.status_label.pack(side="right", padx=20)
 
         # Form
         form = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
