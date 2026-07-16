@@ -17283,6 +17283,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.geometry("900x680")
         self.configure(fg_color=ParagonTheme.BG_DARK)
         self.transient(parent)
+        self.after(10, lambda: self.state('zoomed'))  # Open maximized
 
         self._worker = None            # background thread
         self._monitoring = False       # monitor mode active?
