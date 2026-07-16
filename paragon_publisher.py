@@ -17657,6 +17657,28 @@ class HarvesterDialog(ctk.CTkToplevel):
         if self.winfo_exists():
             self.after(0, lambda: self.status_label.configure(text=text))
 
+    def _notify_complete(self, title, message):
+        """Pop a completion dialog with an attention sound. Safe to call from a
+        worker thread - it marshals onto the main thread."""
+        if not self.winfo_exists():
+            return
+        def show():
+            if not self.winfo_exists():
+                return
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                try:
+                    self.bell()
+                except Exception:
+                    pass
+            try:
+                messagebox.showinfo(title, message, parent=self)
+            except Exception:
+                pass
+        self.after(0, show)
+
     # ---- external-tool check --------------------------------------------
     def _check_tools(self):
         self._run_env_check(verbose=True)
@@ -17770,18 +17792,24 @@ class HarvesterDialog(ctk.CTkToplevel):
 
         def work():
             paragon_harvester.set_logger(self._log)
+            processed = 0
+            errored = False
             try:
-                paragon_harvester.run_harvest(
+                processed = paragon_harvester.run_harvest(
                     source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                     channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
-                    should_stop=self._stop_event.is_set)
+                    should_stop=self._stop_event.is_set) or 0
             except Exception as e:
+                errored = True
                 self._log(f"ERROR: {e}")
             finally:
                 paragon_harvester.set_logger(None)
                 self._set_status("Idle")
                 if self.winfo_exists():
                     self.after(0, lambda: self._busy(False))
+                if not errored and not self._stop_event.is_set():
+                    self._notify_complete("Processing Complete",
+                                          f"Organized {processed} file(s) into shows.")
 
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
@@ -17837,21 +17865,24 @@ class HarvesterDialog(ctk.CTkToplevel):
         def work():
             import time as _time
             paragon_harvester.set_logger(self._log)
+            dl_ok = dl_fail = org_n = 0
+            errored = False
             try:
                 while True:
-                    paragon_harvester.download_urls(
+                    ok, fail = paragon_harvester.download_urls(
                         urls, source, resolution=resolution, container=container,
                         archive_file=archive, should_stop=self._stop_event.is_set,
                         whole_playlist=whole_playlist,
                         cookies_from_browser=cookies_from_browser,
                         prefer_h264=prefer_h264)
+                    dl_ok += ok; dl_fail += fail
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")
-                        paragon_harvester.run_harvest(
+                        org_n += paragon_harvester.run_harvest(
                             source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                             channel=channel,
                             new_show_cb=self._make_new_show_cb(default_genre, channel),
-                            should_stop=self._stop_event.is_set)
+                            should_stop=self._stop_event.is_set) or 0
                     if not repeat_min or self._stop_event.is_set():
                         break
                     self._set_status(f"Waiting {repeat_min} min for next run...")
@@ -17860,12 +17891,21 @@ class HarvesterDialog(ctk.CTkToplevel):
                         _time.sleep(1)
                         waited += 1
             except Exception as e:
+                errored = True
                 self._log(f"ERROR: {e}")
             finally:
                 paragon_harvester.set_logger(None)
                 self._set_status("Idle")
                 if self.winfo_exists():
                     self.after(0, lambda: self._busy(False))
+                # Notify on a natural finish (not when the user hit Stop).
+                if not errored and not self._stop_event.is_set():
+                    msg = f"Downloaded {dl_ok} URL(s)"
+                    if dl_fail:
+                        msg += f"  ({dl_fail} with errors)"
+                    if organize:
+                        msg += f"\nOrganized {org_n} file(s) into shows."
+                    self._notify_complete("Downloads Complete", msg)
 
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
