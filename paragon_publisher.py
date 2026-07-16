@@ -17283,7 +17283,13 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.geometry("900x680")
         self.configure(fg_color=ParagonTheme.BG_DARK)
         self.transient(parent)
-        self.after(10, lambda: self.state('zoomed'))  # Open maximized
+        # Open borderless fullscreen. F11 toggles it; Esc drops back to a
+        # maximized window (the title bar is hidden in fullscreen, but the
+        # in-dialog CLOSE button still works).
+        self._fullscreen = True
+        self.after(10, lambda: self.attributes('-fullscreen', True))
+        self.bind('<F11>', self._toggle_fullscreen)
+        self.bind('<Escape>', self._exit_fullscreen)
 
         self._worker = None            # background thread
         self._monitoring = False       # monitor mode active?
@@ -17832,6 +17838,26 @@ class HarvesterDialog(ctk.CTkToplevel):
     def _request_stop(self):
         self._stop_event.set()
         self._set_status("Stopping...")
+
+    def _toggle_fullscreen(self, event=None):
+        self._fullscreen = not getattr(self, "_fullscreen", False)
+        try:
+            self.attributes('-fullscreen', self._fullscreen)
+            if not self._fullscreen:
+                self.state('zoomed')
+        except Exception:
+            pass
+        return "break"
+
+    def _exit_fullscreen(self, event=None):
+        if getattr(self, "_fullscreen", False):
+            self._fullscreen = False
+            try:
+                self.attributes('-fullscreen', False)
+                self.state('zoomed')
+            except Exception:
+                pass
+        return "break"
 
     def _on_close(self):
         self._stop_event.set()
