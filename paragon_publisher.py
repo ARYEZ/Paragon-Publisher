@@ -17649,6 +17649,7 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_ask_each"] = self.ask_each_var.get()
             cfg["harvester_whole_playlist"] = self.whole_playlist_var.get()
             cfg["harvester_cookies"] = self.cookies_var.get()
+            cfg["harvester_cookies_file"] = self.cookies_file_entry.get().strip()
             cfg["harvester_codec"] = self.codec_var.get()
             cfg["harvester_subscriptions"] = self._subscriptions
             with open(self.CONFIG_PATH, "w") as f:
@@ -17781,6 +17782,20 @@ class HarvesterDialog(ctk.CTkToplevel):
         ParagonLabel(opt2, text="(403 fix)",
                      style="muted", anchor="w").pack(side="left")
 
+        # cookies.txt file - the reliable auth path when browser extraction is
+        # blocked (Chrome cookie lock / app-bound encryption). Overrides the
+        # 'Cookies from' browser when set.
+        cf = ctk.CTkFrame(dl, fg_color="transparent")
+        cf.pack(fill="x", padx=12, pady=(0, 6))
+        ParagonLabel(cf, text="Cookie file", style="muted", width=90, anchor="w").pack(side="left")
+        self.cookies_file_entry = ParagonEntry(cf)
+        self.cookies_file_entry.insert(0, cfg.get("harvester_cookies_file", ""))
+        self.cookies_file_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        ParagonSecondaryButton(cf, text="Browse", width=90,
+                               command=self._browse_cookies_file).pack(side="left")
+        ParagonLabel(cf, text="cookies.txt (overrides browser)",
+                     style="muted", anchor="w").pack(side="left", padx=(8, 0))
+
         dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
         dl_btns.pack(fill="x", padx=12, pady=(0, 6))
         self.download_btn = ParagonButton(dl_btns, text="⬇ DOWNLOAD",
@@ -17855,6 +17870,14 @@ class HarvesterDialog(ctk.CTkToplevel):
         if folder:
             entry.delete(0, "end")
             entry.insert(0, folder)
+
+    def _browse_cookies_file(self):
+        path = filedialog.askopenfilename(
+            title="Select cookies.txt", parent=self,
+            filetypes=[("Cookies text file", "*.txt"), ("All files", "*.*")])
+        if path:
+            self.cookies_file_entry.delete(0, "end")
+            self.cookies_file_entry.insert(0, path)
 
     # ---- logging (thread-safe via .after) -------------------------------
     def _log(self, msg):
@@ -18085,6 +18108,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         whole_playlist = self.whole_playlist_var.get()
         cookies = self.cookies_var.get()
         cookies_from_browser = None if cookies == "none" else cookies
+        cookies_file = self.cookies_file_entry.get().strip() or None
         prefer_h264 = self.codec_var.get().startswith("H.264")
         try:
             repeat_min = int(self.repeat_entry.get().strip() or "0")
@@ -18112,7 +18136,7 @@ class HarvesterDialog(ctk.CTkToplevel):
                         archive_file=archive, should_stop=self._stop_event.is_set,
                         whole_playlist=whole_playlist,
                         cookies_from_browser=cookies_from_browser,
-                        prefer_h264=prefer_h264)
+                        prefer_h264=prefer_h264, cookies_file=cookies_file)
                     dl_ok += ok; dl_fail += fail
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")

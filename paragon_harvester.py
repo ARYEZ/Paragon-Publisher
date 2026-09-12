@@ -1248,7 +1248,8 @@ def is_watch_url(url):
 def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv",
                              archive_file=None, no_playlist=False,
                              cookies_from_browser=None, js_runtime=None,
-                             js_runtime_path=None, prefer_h264=True):
+                             js_runtime_path=None, prefer_h264=True,
+                             cookies_file=None):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
@@ -1294,7 +1295,12 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         cmd += ["--js-runtimes", f"{js_runtime}:{js_runtime_path}"]
     elif js_runtime in ("node", "bun"):
         cmd += ["--js-runtimes", js_runtime]
-    if cookies_from_browser:
+    # A cookies.txt file is the most reliable auth path on Windows (Chrome
+    # locks / app-bound-encrypts its cookie DB, breaking --cookies-from-browser).
+    # It takes precedence over live browser extraction when both are set.
+    if cookies_file:
+        cmd += ["--cookies", cookies_file]
+    elif cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
     if archive_file:
         cmd += ["--download-archive", archive_file]
@@ -1303,7 +1309,7 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
 
 def download_urls(urls, source_folder, resolution=None, container="mkv",
                   archive_file=None, should_stop=None, whole_playlist=False,
-                  cookies_from_browser=None, prefer_h264=True):
+                  cookies_from_browser=None, prefer_h264=True, cookies_file=None):
     """Download each URL (video, playlist, or channel) into source_folder via
     yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
     should_stop, if given, is polled to allow cancelling between and during
@@ -1352,7 +1358,8 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                                        cookies_from_browser=cookies_from_browser,
                                        js_runtime=js_runtime,
                                        js_runtime_path=js_runtime_path,
-                                       prefer_h264=prefer_h264)
+                                       prefer_h264=prefer_h264,
+                                       cookies_file=cookies_file)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)
