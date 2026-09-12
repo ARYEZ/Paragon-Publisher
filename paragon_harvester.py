@@ -1278,6 +1278,11 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         cmd += ["-S", "vcodec:h264,res,acodec:aac"]
     cmd += [
         "--merge-output-format", container,
+        # merge-output-format only applies when streams are merged; remux-video
+        # also converts a single/already-combined format so the final file
+        # always matches the chosen container (e.g. mkv, not mp4). Both are
+        # no-ops when the file is already in the target container.
+        "--remux-video", container,
         "-o", outtmpl,
         "--no-overwrites",
         "--ignore-errors",       # one bad item shouldn't abort a playlist/channel
