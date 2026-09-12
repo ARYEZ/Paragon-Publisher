@@ -68,6 +68,14 @@ except Exception:
     paragon_harvester = None
 
 
+def _dbg(*args, **kwargs):
+    """No-op stand-in for former debug prints. Writing to the Windows console
+    happens on the UI thread and stutters the app, so debug output is off unless
+    PARAGON_DEBUG is set in the environment."""
+    if os.environ.get("PARAGON_DEBUG"):
+        print(*args, **kwargs)
+
+
 # =============================================================================
 # MULTI-MONITOR WINDOW MEMORY
 # Every top-level window remembers its last size and position (i.e. which
@@ -230,11 +238,24 @@ def install_window_memory(win, key):
 
     win._pw_last = None
 
+    def _do_capture():
+        win._pw_cap_job = None
+        cap = _capture_window(win)
+        if cap:
+            win._pw_last = cap
+
     def _on_configure(e):
+        # Debounced: coalesce the rapid <Configure> stream during a drag/resize
+        # into a single capture ~300ms after motion stops, so we're not doing
+        # several window-manager queries per event (which hurt fluidity).
         if e.widget is win:
-            cap = _capture_window(win)
-            if cap:
-                win._pw_last = cap
+            try:
+                job = getattr(win, "_pw_cap_job", None)
+                if job:
+                    win.after_cancel(job)
+                win._pw_cap_job = win.after(300, _do_capture)
+            except Exception:
+                _do_capture()
 
     def _on_destroy(e):
         if e.widget is win and getattr(win, "_pw_last", None):
@@ -6354,7 +6375,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
     """MediaElch-style movie scraper dialog"""
     
     def __init__(self, master, files: List[str]):
-        print("DEBUG: MovieScraperDialog __init__ START")
+        _dbg("DEBUG: MovieScraperDialog __init__ START")
         super().__init__(master)
         
         self.files = files
@@ -6364,31 +6385,31 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.poster_data = None
         self._poster_photo = None
         
-        print("DEBUG: Setting window properties")
+        _dbg("DEBUG: Setting window properties")
         self.title("🎬 Movie Scraper")
         self.geometry("1100x750")
         self.configure(fg_color=ParagonTheme.BG_DARK)
         # self.transient(master)  # Disabled - causes window issues on Windows
         
-        print("DEBUG: Creating UI")
+        _dbg("DEBUG: Creating UI")
         self._create_ui()
-        print("DEBUG: UI created")
+        _dbg("DEBUG: UI created")
         
         # Auto-parse first file
         if files:
-            print(f"DEBUG: Parsing first file: {files[0]}")
+            _dbg(f"DEBUG: Parsing first file: {files[0]}")
             parsed = MediaFileParser.parse_movie(os.path.basename(files[0]))
             if parsed.get('title'):
                 self.search_entry.insert(0, parsed['title'])
                 if parsed.get('year'):
                     self.year_entry.insert(0, parsed['year'])
         
-        print("DEBUG: MovieScraperDialog __init__ END")
+        _dbg("DEBUG: MovieScraperDialog __init__ END")
         self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
     
     def _create_ui(self):
         """Create the movie scraper UI"""
-        print("DEBUG: _create_ui START")
+        _dbg("DEBUG: _create_ui START")
         import sys
         sys.stdout.flush()
         
@@ -6399,7 +6420,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         inner = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
         inner.pack(fill="both", expand=True, padx=2, pady=2)
         
-        print("DEBUG: Created main containers")
+        _dbg("DEBUG: Created main containers")
         sys.stdout.flush()
         
         # Header
@@ -6409,7 +6430,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         ParagonLabel(header, text="🎬 MOVIE SCRAPER", style="title").pack(side="left")
         ParagonLabel(header, text=f"{len(self.files)} file(s)", style="muted").pack(side="right")
         
-        print("DEBUG: Created header")
+        _dbg("DEBUG: Created header")
         sys.stdout.flush()
         
         # Search section
@@ -6419,7 +6440,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         search_inner = ctk.CTkFrame(search_frame, fg_color="transparent")
         search_inner.pack(fill="x", padx=15, pady=12)
         
-        print("DEBUG: Created search frame")
+        _dbg("DEBUG: Created search frame")
         sys.stdout.flush()
         
         # Movie title
@@ -6433,7 +6454,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.search_entry.pack(fill="x")
         self.search_entry.bind('<Return>', lambda e: self._search())
         
-        print("DEBUG: Created search entry")
+        _dbg("DEBUG: Created search entry")
         sys.stdout.flush()
         
         # Year
@@ -6446,7 +6467,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         )
         self.year_entry.pack()
         
-        print("DEBUG: Created year entry")
+        _dbg("DEBUG: Created year entry")
         sys.stdout.flush()
         
         # Search button
@@ -6455,14 +6476,14 @@ class MovieScraperDialog(ctk.CTkToplevel):
         ParagonLabel(btn_frame, text=" ", style="muted").pack()
         ParagonButton(btn_frame, text="🔍 SEARCH", command=self._search, width=120, height=38).pack()
         
-        print("DEBUG: Created search button")
+        _dbg("DEBUG: Created search button")
         sys.stdout.flush()
         
         # Content area - two panels
         content = ctk.CTkFrame(inner, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=(0, 10))
         
-        print("DEBUG: Created content frame")
+        _dbg("DEBUG: Created content frame")
         sys.stdout.flush()
         
         # Left panel - Search results (SIMPLIFIED - no scrollable frame)
@@ -6472,27 +6493,27 @@ class MovieScraperDialog(ctk.CTkToplevel):
         
         ParagonLabel(left_panel, text="SEARCH RESULTS", style="header").pack(anchor="w", padx=15, pady=(10, 5))
         
-        print("DEBUG: About to create scrollable frame...")
+        _dbg("DEBUG: About to create scrollable frame...")
         sys.stdout.flush()
         
         # Use regular frame instead of scrollable to test
         self.results_list = ctk.CTkFrame(left_panel, fg_color=ParagonTheme.BG_DARK)
         self.results_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
-        print("DEBUG: Created results list frame")
+        _dbg("DEBUG: Created results list frame")
         sys.stdout.flush()
         
         self.results_status = ParagonLabel(self.results_list, text="Enter movie title and search", style="muted")
         self.results_status.pack(pady=20)
         
-        print("DEBUG: Created results status")
+        _dbg("DEBUG: Created results status")
         sys.stdout.flush()
         
         # Right panel - Movie details
         right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
         right_panel.pack(side="left", fill="both", expand=True)
         
-        print("DEBUG: Created right panel")
+        _dbg("DEBUG: Created right panel")
         sys.stdout.flush()
         
         # Movie info header
@@ -6507,7 +6528,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.poster_label = ctk.CTkLabel(self.poster_frame, text="No\nPoster", text_color=ParagonTheme.TEXT_SECONDARY)
         self.poster_label.pack(expand=True)
         
-        print("DEBUG: Created poster frame")
+        _dbg("DEBUG: Created poster frame")
         sys.stdout.flush()
         
         # Movie title and info
@@ -6526,7 +6547,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.movie_genres_label = ParagonLabel(title_info, text="", style="muted")
         self.movie_genres_label.pack(anchor="w")
         
-        print("DEBUG: Created movie info labels")
+        _dbg("DEBUG: Created movie info labels")
         sys.stdout.flush()
         
         # Overview/plot
@@ -6539,7 +6560,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.overview_text.pack(fill="x", padx=15, pady=(0, 10))
         self.overview_text.configure(state="disabled")
         
-        print("DEBUG: Created overview textbox")
+        _dbg("DEBUG: Created overview textbox")
         sys.stdout.flush()
         
         # Cast
@@ -6548,7 +6569,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         self.cast_label = ParagonLabel(right_panel, text="", style="muted")
         self.cast_label.pack(anchor="w", padx=15, pady=(0, 10))
         
-        print("DEBUG: Created cast label")
+        _dbg("DEBUG: Created cast label")
         sys.stdout.flush()
         
         # Options - Row 1
@@ -6601,7 +6622,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left")
         
-        print("DEBUG: Created options checkboxes")
+        _dbg("DEBUG: Created options checkboxes")
         sys.stdout.flush()
         
         # Bottom buttons
@@ -6611,7 +6632,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         ParagonSecondaryButton(btn_frame2, text="CANCEL", command=self.destroy, width=100).pack(side="left")
         ParagonButton(btn_frame2, text="✓ APPLY TO FILES", command=self._apply, width=160).pack(side="right")
         
-        print("DEBUG: _create_ui END")
+        _dbg("DEBUG: _create_ui END")
         sys.stdout.flush()
     
     def _search(self):
@@ -6768,17 +6789,17 @@ class MovieScraperDialog(ctk.CTkToplevel):
     
     def _apply(self):
         """Apply scraped data to files"""
-        print("DEBUG: _apply called")
+        _dbg("DEBUG: _apply called")
         
         if not self.movie_details:
             messagebox.showinfo("Select Movie", "Please search and select a movie first")
             return
         
-        print(f"DEBUG: movie_details keys: {self.movie_details.keys()}")
-        print(f"DEBUG: poster_path: {self.movie_details.get('poster_path')}")
-        print(f"DEBUG: backdrop_path: {self.movie_details.get('backdrop_path')}")
-        print(f"DEBUG: download_poster checkbox: {self.download_poster.get()}")
-        print(f"DEBUG: download_fanart checkbox: {self.download_fanart.get()}")
+        _dbg(f"DEBUG: movie_details keys: {self.movie_details.keys()}")
+        _dbg(f"DEBUG: poster_path: {self.movie_details.get('poster_path')}")
+        _dbg(f"DEBUG: backdrop_path: {self.movie_details.get('backdrop_path')}")
+        _dbg(f"DEBUG: download_poster checkbox: {self.download_poster.get()}")
+        _dbg(f"DEBUG: download_fanart checkbox: {self.download_fanart.get()}")
         
         success = 0
         errors = []
@@ -6789,8 +6810,8 @@ class MovieScraperDialog(ctk.CTkToplevel):
                 basename = os.path.basename(filepath)
                 name, ext = os.path.splitext(basename)
                 
-                print(f"DEBUG: Processing file: {basename}")
-                print(f"DEBUG: Folder: {folder}")
+                _dbg(f"DEBUG: Processing file: {basename}")
+                _dbg(f"DEBUG: Folder: {folder}")
                 
                 # Create NFO
                 if self.create_nfo.get():
@@ -6802,37 +6823,37 @@ class MovieScraperDialog(ctk.CTkToplevel):
                 
                 # Download poster
                 if self.download_poster.get() and self.movie_details.get('poster_path'):
-                    print(f"DEBUG: Downloading poster from: {self.movie_details['poster_path']}")
+                    _dbg(f"DEBUG: Downloading poster from: {self.movie_details['poster_path']}")
                     poster_data = TMDBAPI.download_image(self.movie_details['poster_path'], 'original')
-                    print(f"DEBUG: Poster data received: {len(poster_data) if poster_data else 'None'} bytes")
+                    _dbg(f"DEBUG: Poster data received: {len(poster_data) if poster_data else 'None'} bytes")
                     if poster_data:
                         poster_path = os.path.join(folder, "poster.jpg")
                         with open(poster_path, 'wb') as f:
                             f.write(poster_data)
                         print(f"Downloaded poster: {poster_path}")
                     else:
-                        print("DEBUG: No poster data received!")
+                        _dbg("DEBUG: No poster data received!")
                 else:
-                    print(f"DEBUG: Skipping poster - checkbox: {self.download_poster.get()}, path: {self.movie_details.get('poster_path')}")
+                    _dbg(f"DEBUG: Skipping poster - checkbox: {self.download_poster.get()}, path: {self.movie_details.get('poster_path')}")
                 
                 # Download fanart
                 if self.download_fanart.get() and self.movie_details.get('backdrop_path'):
-                    print(f"DEBUG: Downloading fanart from: {self.movie_details['backdrop_path']}")
+                    _dbg(f"DEBUG: Downloading fanart from: {self.movie_details['backdrop_path']}")
                     fanart_data = TMDBAPI.download_image(self.movie_details['backdrop_path'], 'original')
-                    print(f"DEBUG: Fanart data received: {len(fanart_data) if fanart_data else 'None'} bytes")
+                    _dbg(f"DEBUG: Fanart data received: {len(fanart_data) if fanart_data else 'None'} bytes")
                     if fanart_data:
                         fanart_path = os.path.join(folder, "fanart.jpg")
                         with open(fanart_path, 'wb') as f:
                             f.write(fanart_data)
                         print(f"Downloaded fanart: {fanart_path}")
                     else:
-                        print("DEBUG: No fanart data received!")
+                        _dbg("DEBUG: No fanart data received!")
                 else:
-                    print(f"DEBUG: Skipping fanart - checkbox: {self.download_fanart.get()}, path: {self.movie_details.get('backdrop_path')}")
+                    _dbg(f"DEBUG: Skipping fanart - checkbox: {self.download_fanart.get()}, path: {self.movie_details.get('backdrop_path')}")
                 
                 # Download landscape
                 if self.download_landscape.get() and self.movie_details.get('landscape_path'):
-                    print(f"DEBUG: Downloading landscape from: {self.movie_details['landscape_path']}")
+                    _dbg(f"DEBUG: Downloading landscape from: {self.movie_details['landscape_path']}")
                     landscape_data = TMDBAPI.download_image(self.movie_details['landscape_path'], 'original')
                     if landscape_data:
                         landscape_path = os.path.join(folder, "landscape.jpg")
@@ -6841,7 +6862,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
                         print(f"Downloaded landscape: {landscape_path}")
                 elif self.download_landscape.get() and self.movie_details.get('backdrop_path'):
                     # Fallback to backdrop if no specific landscape
-                    print("DEBUG: No landscape, using backdrop as landscape")
+                    _dbg("DEBUG: No landscape, using backdrop as landscape")
                     landscape_data = TMDBAPI.download_image(self.movie_details['backdrop_path'], 'original')
                     if landscape_data:
                         landscape_path = os.path.join(folder, "landscape.jpg")
@@ -6851,7 +6872,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
                 
                 # Download logo
                 if self.download_logo.get() and self.movie_details.get('logo_path'):
-                    print(f"DEBUG: Downloading logo from: {self.movie_details['logo_path']}")
+                    _dbg(f"DEBUG: Downloading logo from: {self.movie_details['logo_path']}")
                     logo_data = TMDBAPI.download_image(self.movie_details['logo_path'], 'original')
                     if logo_data:
                         # Logos are usually PNG
@@ -6862,7 +6883,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
                         print(f"Downloaded logo: {logo_path}")
                 else:
                     if self.download_logo.get():
-                        print(f"DEBUG: No logo available for this movie")
+                        _dbg(f"DEBUG: No logo available for this movie")
                 
                 # Rename file
                 if self.rename_file.get():
@@ -14742,7 +14763,7 @@ MusicBrainz Album Lookup:
     
     def _create_media_tab(self, parent):
         """Media tab - MediaElch-style movie/TV scraping"""
-        print("DEBUG: _create_media_tab START")
+        _dbg("DEBUG: _create_media_tab START")
         
         ParagonLabel(parent, text="🎬 MEDIA MANAGER", style="accent").pack(anchor="w", padx=10, pady=(15, 10))
         
@@ -14764,10 +14785,10 @@ MusicBrainz Album Lookup:
         )
         self.tmdb_api_entry.pack(side="left", padx=(10, 5))
         
-        print("DEBUG: About to load TMDB API key")
+        _dbg("DEBUG: About to load TMDB API key")
         # Load saved API key if exists
         self._load_tmdb_api_key()
-        print("DEBUG: TMDB API key loaded")
+        _dbg("DEBUG: TMDB API key loaded")
         
         ParagonSecondaryButton(
             api_inner, text="SAVE", width=60,
@@ -14899,27 +14920,27 @@ MusicBrainz Album Lookup:
             width=160
         ).pack(side="left")
 
-        print("DEBUG: _create_media_tab END")
+        _dbg("DEBUG: _create_media_tab END")
     
     def _load_tmdb_api_key(self):
         """Load saved TMDB API key"""
-        print("DEBUG: _load_tmdb_api_key START")
+        _dbg("DEBUG: _load_tmdb_api_key START")
         config_path = Path.home() / ".pyrenamer_config.json"
         try:
             if config_path.exists():
-                print(f"DEBUG: Config file exists at {config_path}")
+                _dbg(f"DEBUG: Config file exists at {config_path}")
                 with open(config_path, 'r') as f:
                     config = json.load(f)
                     api_key = config.get('tmdb_api_key', '')
                     if api_key:
-                        print("DEBUG: Found API key, inserting into entry")
+                        _dbg("DEBUG: Found API key, inserting into entry")
                         self.tmdb_api_entry.insert(0, api_key)
                         TMDBAPI.set_api_key(api_key)
             else:
-                print("DEBUG: No config file found")
+                _dbg("DEBUG: No config file found")
         except Exception as e:
-            print(f"DEBUG: Could not load config: {e}")
-        print("DEBUG: _load_tmdb_api_key END")
+            _dbg(f"DEBUG: Could not load config: {e}")
+        _dbg("DEBUG: _load_tmdb_api_key END")
     
     def _save_tmdb_api_key(self):
         """Save TMDB API key"""
@@ -15231,15 +15252,15 @@ MusicBrainz Album Lookup:
 
     def _open_movie_scraper(self):
         """Open movie scraper dialog"""
-        print("DEBUG: _open_movie_scraper CALLED!")
+        _dbg("DEBUG: _open_movie_scraper CALLED!")
         import sys
         sys.stdout.flush()
         
-        print("DEBUG: Getting API key from entry")
+        _dbg("DEBUG: Getting API key from entry")
         sys.stdout.flush()
         
         api_key = self.tmdb_api_entry.get().strip()
-        print(f"DEBUG: API key length: {len(api_key)}")
+        _dbg(f"DEBUG: API key length: {len(api_key)}")
         sys.stdout.flush()
         
         if not api_key:
@@ -15249,32 +15270,32 @@ MusicBrainz Album Lookup:
         TMDBAPI.set_api_key(api_key)
         
         # Get selected video files
-        print("DEBUG: Getting selected files")
+        _dbg("DEBUG: Getting selected files")
         sys.stdout.flush()
         
         selected_indices = self.file_list.get_selected_indices()
         
         if selected_indices:
-            print(f"DEBUG: Selected indices: {selected_indices}")
+            _dbg(f"DEBUG: Selected indices: {selected_indices}")
             sys.stdout.flush()
             files = [self.files[i].path for i in selected_indices if MediaFileParser.is_video_file(self.files[i].path)]
         else:
-            print("DEBUG: No selection, using all video files")
+            _dbg("DEBUG: No selection, using all video files")
             sys.stdout.flush()
             files = [f.path for f in self.files if MediaFileParser.is_video_file(f.path)]
         
-        print(f"DEBUG: Found {len(files)} video files")
+        _dbg(f"DEBUG: Found {len(files)} video files")
         sys.stdout.flush()
         
         if not files:
             messagebox.showinfo("No Video Files", "No video files selected or loaded.\n\nSupported: MKV, MP4, AVI, MOV, WMV, M4V")
             return
         
-        print("DEBUG: Creating MovieEditorDialog")
+        _dbg("DEBUG: Creating MovieEditorDialog")
         sys.stdout.flush()
         
         dialog = MovieEditorDialog(self, files)
-        print("DEBUG: _open_movie_scraper END")
+        _dbg("DEBUG: _open_movie_scraper END")
         sys.stdout.flush()
     
     def _open_tv_scraper(self):
