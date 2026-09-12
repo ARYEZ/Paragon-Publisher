@@ -129,44 +129,118 @@ def _geo_on_screen(win, geo):
     return (left - 50) <= gx <= (right - 100) and (top - 50) <= gy <= (bottom - 100)
 
 
-def install_window_memory(win, key):
-    """Restore win's saved geometry (if still on-screen) and re-save it on
-    close. Safe on any Tk toplevel; every failure is swallowed so window memory
-    can never break a dialog."""
-    saved = _load_window_cfg().get(key)
+def _point_on_screen(win, x, y):
+    left, top, right, bottom = _virtual_screen_bounds(win)
+    return (left - 50) <= x <= (right - 100) and (top - 50) <= y <= (bottom - 100)
 
-    def _restore():
+
+def _cascade_window(win):
+    n = _window_cascade[0] % 6
+    _window_cascade[0] += 1
+    if n:
         try:
-            if saved and _geo_on_screen(win, saved):
-                win.geometry(saved)
+            win.geometry(f"+{80 + n * 36}+{80 + n * 36}")
+        except Exception:
+            pass
+
+
+def _capture_window(win):
+    """Snapshot a window's placement. For maximized/fullscreen windows we record
+    the TRUE on-screen corner (winfo_rootx/y) - not geometry(), which reports the
+    stale un-maximized rect and would always read as the primary monitor - plus
+    the mode, so we can move it to the right monitor and re-maximize on restore."""
+    try:
+        fs = bool(win.attributes('-fullscreen'))
+    except Exception:
+        fs = False
+    try:
+        st = win.state()
+    except Exception:
+        st = 'normal'
+    if st in ('withdrawn', 'iconic'):
+        return None
+    try:
+        x, y = win.winfo_rootx(), win.winfo_rooty()
+    except Exception:
+        return None
+    if fs or st == 'zoomed':
+        return {"mode": ("fs" if fs else "zoomed"), "x": x, "y": y}
+    try:
+        return {"mode": "normal", "geo": win.geometry()}
+    except Exception:
+        return None
+
+
+def _apply_saved(win, saved):
+    if not saved:
+        _cascade_window(win)
+        return
+    if isinstance(saved, str):            # legacy format: a bare geometry string
+        saved = {"mode": "normal", "geo": saved}
+    mode = saved.get("mode", "normal")
+    if mode == "normal":
+        geo = saved.get("geo")
+        if geo and _geo_on_screen(win, geo):
+            try:
+                win.geometry(geo)
+            except Exception:
+                pass
+        else:
+            _cascade_window(win)
+        return
+    # Maximized / fullscreen: move onto the saved monitor, then re-assert the
+    # mode. Done on a later tick (after the dialog's own zoom/fullscreen call) as
+    # un-maximize -> move -> re-maximize, which reliably relocates the window.
+    x, y = saved.get("x", 0), saved.get("y", 0)
+    if not _point_on_screen(win, x, y):
+        _cascade_window(win)
+        return
+
+    def _apply_mode():
+        try:
+            if mode == "fs":
+                win.attributes('-fullscreen', False)
+                win.state('normal')
+                win.geometry(f"+{x}+{y}")
+                win.update_idletasks()
+                win.attributes('-fullscreen', True)
             else:
-                # First open (or off-screen): a gentle cascade so a burst of
-                # windows doesn't perfectly overlap.
-                n = _window_cascade[0] % 6
-                _window_cascade[0] += 1
-                if n:
-                    win.geometry(f"+{80 + n * 36}+{80 + n * 36}")
+                win.state('normal')
+                win.geometry(f"+{x}+{y}")
+                win.update_idletasks()
+                win.state('zoomed')
         except Exception:
             pass
     try:
-        win.after(0, _restore)
+        win.after(140, _apply_mode)
     except Exception:
         pass
 
-    win._pw_last_geo = None
+
+def install_window_memory(win, key):
+    """Restore win's saved placement and re-save it on close. Safe on any Tk
+    toplevel; every failure is swallowed so window memory can never break a
+    dialog. Maximized/fullscreen windows are relocated to the saved monitor and
+    re-maximized (see _capture_window / _apply_saved)."""
+    saved = _load_window_cfg().get(key)
+    try:
+        win.after(0, lambda: _apply_saved(win, saved))
+    except Exception:
+        pass
+
+    win._pw_last = None
 
     def _on_configure(e):
         if e.widget is win:
-            try:
-                win._pw_last_geo = win.geometry()
-            except Exception:
-                pass
+            cap = _capture_window(win)
+            if cap:
+                win._pw_last = cap
 
     def _on_destroy(e):
-        if e.widget is win and getattr(win, "_pw_last_geo", None):
+        if e.widget is win and getattr(win, "_pw_last", None):
             try:
                 cfg = _load_window_cfg()
-                cfg[key] = win._pw_last_geo
+                cfg[key] = win._pw_last
                 _save_window_cfg(cfg)
             except Exception:
                 pass
