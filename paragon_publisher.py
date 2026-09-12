@@ -206,6 +206,17 @@ def _apply_saved(win, saved):
 
     def _apply_mode():
         try:
+            # Fast path: if the window is already on the target monitor (the
+            # common case - e.g. it opens maximized on monitor 1 and that's
+            # where it lives), skip the un-maximize/move/re-maximize entirely.
+            # That dance forces two extra re-renders and is what made opening
+            # windows feel laggy.
+            try:
+                cx, cy = win.winfo_rootx(), win.winfo_rooty()
+                if abs(cx - x) < 300 and abs(cy - y) < 300:
+                    return
+            except Exception:
+                pass
             if mode == "fs":
                 win.attributes('-fullscreen', False)
                 win.state('normal')
