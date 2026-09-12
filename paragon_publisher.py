@@ -69,6 +69,138 @@ except Exception:
 
 
 # =============================================================================
+# MULTI-MONITOR WINDOW MEMORY
+# Every top-level window remembers its last size and position (i.e. which
+# monitor) across sessions, so windows stop stacking on the primary monitor and
+# can be arranged across a multi-monitor setup. Applied globally by wrapping the
+# CTk / CTkToplevel __init__, so it covers every dialog with no per-class edits.
+# =============================================================================
+_WINDOW_CFG_PATH = Path.home() / ".pyrenamer_windows.json"
+_window_cascade = [0]
+_GEO_RE = re.compile(r'^(\d+)x(\d+)([+-]\d+)([+-]\d+)$')
+
+
+def _load_window_cfg():
+    try:
+        if _WINDOW_CFG_PATH.exists():
+            with open(_WINDOW_CFG_PATH, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_window_cfg(cfg):
+    try:
+        with open(_WINDOW_CFG_PATH, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+
+def _virtual_screen_bounds(win):
+    """(left, top, right, bottom) of the whole virtual desktop across all
+    monitors. Uses the Windows API for real multi-monitor bounds; falls back to
+    the primary screen elsewhere."""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        x = u.GetSystemMetrics(76); y = u.GetSystemMetrics(77)   # SM_XVIRTUALSCREEN / Y
+        w = u.GetSystemMetrics(78); h = u.GetSystemMetrics(79)   # SM_CXVIRTUALSCREEN / CY
+        if w > 0 and h > 0:
+            return (x, y, x + w, y + h)
+    except Exception:
+        pass
+    try:
+        return (0, 0, win.winfo_screenwidth(), win.winfo_screenheight())
+    except Exception:
+        return (0, 0, 1920, 1080)
+
+
+def _geo_on_screen(win, geo):
+    """True if the saved geometry's top-left still lands within the current
+    virtual desktop, so a window saved on a now-unplugged monitor isn't
+    restored off-screen and lost."""
+    m = _GEO_RE.match(geo or "")
+    if not m:
+        return False
+    gx, gy = int(m.group(3)), int(m.group(4))
+    left, top, right, bottom = _virtual_screen_bounds(win)
+    return (left - 50) <= gx <= (right - 100) and (top - 50) <= gy <= (bottom - 100)
+
+
+def install_window_memory(win, key):
+    """Restore win's saved geometry (if still on-screen) and re-save it on
+    close. Safe on any Tk toplevel; every failure is swallowed so window memory
+    can never break a dialog."""
+    saved = _load_window_cfg().get(key)
+
+    def _restore():
+        try:
+            if saved and _geo_on_screen(win, saved):
+                win.geometry(saved)
+            else:
+                # First open (or off-screen): a gentle cascade so a burst of
+                # windows doesn't perfectly overlap.
+                n = _window_cascade[0] % 6
+                _window_cascade[0] += 1
+                if n:
+                    win.geometry(f"+{80 + n * 36}+{80 + n * 36}")
+        except Exception:
+            pass
+    try:
+        win.after(0, _restore)
+    except Exception:
+        pass
+
+    win._pw_last_geo = None
+
+    def _on_configure(e):
+        if e.widget is win:
+            try:
+                win._pw_last_geo = win.geometry()
+            except Exception:
+                pass
+
+    def _on_destroy(e):
+        if e.widget is win and getattr(win, "_pw_last_geo", None):
+            try:
+                cfg = _load_window_cfg()
+                cfg[key] = win._pw_last_geo
+                _save_window_cfg(cfg)
+            except Exception:
+                pass
+    try:
+        win.bind("<Configure>", _on_configure, add="+")
+        win.bind("<Destroy>", _on_destroy, add="+")
+    except Exception:
+        pass
+
+
+def _install_window_memory_patch():
+    """Wrap CTk / CTkToplevel __init__ so every window gets position memory,
+    keyed by its class name. Idempotent."""
+    for cls in (ctk.CTkToplevel, ctk.CTk):
+        orig = cls.__init__
+        if getattr(orig, "_pw_wrapped", False):
+            continue
+
+        def _make(orig_init):
+            def _wrapped(self, *args, **kwargs):
+                orig_init(self, *args, **kwargs)
+                try:
+                    install_window_memory(self, type(self).__name__)
+                except Exception:
+                    pass
+            _wrapped._pw_wrapped = True
+            return _wrapped
+        cls.__init__ = _make(orig)
+
+
+_install_window_memory_patch()
+
+
+# =============================================================================
 # MOUSE WHEEL SCROLL FIX FOR CUSTOMTKINTER
 # =============================================================================
 
