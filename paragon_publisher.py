@@ -18493,6 +18493,16 @@ class PresetManagerDialog(ctk.CTkToplevel):
 # =============================================================================
 
 def main():
+    # Performance: CustomTkinter's automatic DPI awareness runs a per-window
+    # scaling tracker that constantly re-checks display DPI (worse across
+    # multiple monitors) and is the most common cause of a sluggish CTk app on
+    # Windows. Turn it off for smoother rendering. If the UI looks small or
+    # blurry on a HiDPI display, set PARAGON_HIDPI=1 to keep crisp scaling.
+    if not os.environ.get("PARAGON_HIDPI"):
+        try:
+            ctk.deactivate_automatic_dpi_awareness()
+        except Exception:
+            pass
     app = PyRenamerApp()
     app.mainloop()
 
