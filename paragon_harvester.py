@@ -1295,6 +1295,12 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         cmd += ["--js-runtimes", f"{js_runtime}:{js_runtime_path}"]
     elif js_runtime in ("node", "bun"):
         cmd += ["--js-runtimes", js_runtime]
+    # YouTube now requires solving a JS "n challenge"; the JS runtime also needs
+    # yt-dlp's EJS solver script (downloaded once from GitHub, then cached).
+    # Without it: "n challenge solving failed" -> "Only images are available" ->
+    # "Requested format is not available".
+    if js_runtime:
+        cmd += ["--remote-components", "ejs:github"]
     # A cookies.txt file is the most reliable auth path on Windows (Chrome
     # locks / app-bound-encrypts its cookie DB, breaking --cookies-from-browser).
     # It takes precedence over live browser extraction when both are set.
