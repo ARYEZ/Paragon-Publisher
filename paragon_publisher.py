@@ -14196,9 +14196,49 @@ class PyRenamerApp(DnDCTk):
         
         # Build UI
         self._create_ui()
-        
+
         # Preload NFS mounts in background
         PyRenamerApp.preload_nfs_mounts()
+
+        # Check for a yt-dlp update shortly after launch (background, non-block).
+        # A stale yt-dlp is the #1 cause of YouTube download breakage, so offer
+        # to update as soon as one is available.
+        self.after(4000, self._startup_ytdlp_update_check)
+
+    def _startup_ytdlp_update_check(self):
+        if not HAS_HARVESTER:
+            return
+
+        def work():
+            try:
+                info = paragon_harvester.check_ytdlp_update()
+            except Exception:
+                return
+            if info.get("update_available") and self.winfo_exists():
+                self.after(0, lambda: self._prompt_ytdlp_update(info))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _prompt_ytdlp_update(self, info):
+        if not self.winfo_exists():
+            return
+        if not messagebox.askyesno(
+                "yt-dlp update available",
+                f"A newer yt-dlp is available:\n\n"
+                f"   installed:  {info['current']}\n"
+                f"   latest:      {info['latest']}\n\n"
+                "Keeping yt-dlp current is the #1 fix for YouTube download "
+                "failures. Update now?"):
+            return
+
+        def work():
+            ok = paragon_harvester.update_ytdlp(print)
+            if self.winfo_exists():
+                self.after(0, lambda: messagebox.showinfo(
+                    "yt-dlp update",
+                    f"yt-dlp updated to {info['latest']}." if ok
+                    else "yt-dlp update failed. Run 'python -m pip install -U "
+                         "yt-dlp' manually."))
+        threading.Thread(target=work, daemon=True).start()
     
     def _init_rule_variables(self):
         """Initialize all rule-related variables"""
@@ -17735,6 +17775,10 @@ class HarvesterDialog(ctk.CTkToplevel):
         ParagonLabel(dl_hdr, text="Download (yt-dlp)", style="subheader").pack(side="left")
         ParagonSecondaryButton(dl_hdr, text="🔧 CHECK TOOLS", width=140, height=28,
                                command=self._check_tools).pack(side="right")
+        self.update_ytdlp_btn = ParagonSecondaryButton(
+            dl_hdr, text="⬆ UPDATE YT-DLP", width=150, height=28,
+            command=self._update_ytdlp)
+        self.update_ytdlp_btn.pack(side="right", padx=(0, 8))
         self.env_warning = ctk.CTkLabel(dl_hdr, text="", text_color=ParagonTheme.WARNING,
                                         font=ctk.CTkFont(size=12), anchor="w")
         self.env_warning.pack(side="left", padx=(10, 0))
@@ -17956,6 +18000,28 @@ class HarvesterDialog(ctk.CTkToplevel):
     # ---- external-tool check --------------------------------------------
     def _check_tools(self):
         self._run_env_check(verbose=True)
+
+    def _update_ytdlp(self):
+        if getattr(self, "_worker", None) and self._worker.is_alive():
+            messagebox.showinfo("Busy", "Wait for the current download to finish first.",
+                                parent=self)
+            return
+        self._append_log("--- Updating yt-dlp ---")
+        try:
+            self.update_ytdlp_btn.configure(state="disabled")
+        except Exception:
+            pass
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            try:
+                paragon_harvester.update_ytdlp(self._log)
+            finally:
+                paragon_harvester.set_logger(None)
+                if self.winfo_exists():
+                    self.after(0, lambda: self.update_ytdlp_btn.configure(state="normal"))
+                    self._run_env_check(verbose=False)
+        threading.Thread(target=work, daemon=True).start()
 
     def _run_env_check(self, verbose):
         def work():

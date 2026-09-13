@@ -1239,6 +1239,58 @@ def check_environment():
             pass
     return info
 
+def get_installed_ytdlp_version():
+    if not shutil.which("yt-dlp"):
+        return None
+    try:
+        out = subprocess.run(["yt-dlp", "--version"], capture_output=True,
+                             text=True, timeout=10)
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+def get_latest_ytdlp_version(timeout=8):
+    """Latest stable yt-dlp version from PyPI, or None if it can't be reached."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))["info"]["version"]
+    except Exception:
+        return None
+
+def _ver_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+def check_ytdlp_update(timeout=8):
+    """Return {current, latest, update_available}. Needs network for `latest`;
+    update_available is False when either version is unknown."""
+    current = get_installed_ytdlp_version()
+    latest = get_latest_ytdlp_version(timeout)
+    available = bool(current and latest and _ver_tuple(current) < _ver_tuple(latest))
+    return {"current": current, "latest": latest, "update_available": available}
+
+def update_ytdlp(log=None):
+    """Update yt-dlp via pip in the running interpreter's environment. Streams
+    output through log (defaults to print). Returns True on success."""
+    import sys
+    logf = log or print
+    logf("Updating yt-dlp (pip install -U yt-dlp)...")
+    try:
+        proc = subprocess.Popen([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            logf(line.rstrip())
+        proc.wait()
+        ok = proc.returncode == 0
+        logf("yt-dlp update complete." if ok
+             else f"yt-dlp update failed (exit code {proc.returncode}).")
+        return ok
+    except Exception as e:
+        logf(f"yt-dlp update error: {e}")
+        return False
+
 def is_watch_url(url):
     """True if url points at a single video (a watch page or youtu.be link),
     even when it carries a '&list=...' mix/playlist parameter."""
