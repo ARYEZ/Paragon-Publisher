@@ -17684,6 +17684,9 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_urls"] = self.url_box.get("1.0", "end").strip()
             cfg["harvester_resolution"] = self.res_var.get()
             cfg["harvester_container"] = self.container_var.get()
+            cfg["harvester_mode"] = self.mode_var.get()
+            cfg["harvester_audio_format"] = self.audio_format_var.get()
+            cfg["harvester_audio_bitrate"] = self.audio_bitrate_var.get()
             cfg["harvester_skip"] = self.skip_var.get()
             cfg["harvester_repeat"] = self.repeat_entry.get().strip()
             cfg["harvester_ask_each"] = self.ask_each_var.get()
@@ -17791,6 +17794,24 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.url_box.pack(fill="x", padx=12, pady=(2, 6))
         if cfg.get("harvester_urls"):
             self.url_box.insert("1.0", cfg.get("harvester_urls"))
+
+        # Mode row: Video vs Audio-only (mirrors 4K Video Downloader's toggle).
+        moderow = ctk.CTkFrame(dl, fg_color="transparent")
+        moderow.pack(fill="x", padx=12, pady=(0, 6))
+        ParagonLabel(moderow, text="Download", style="muted", anchor="w").pack(side="left")
+        self.mode_var = ctk.StringVar(value=cfg.get("harvester_mode", "Video"))
+        ParagonOptionMenu(moderow, values=["Video", "Audio only"],
+                          variable=self.mode_var, width=120).pack(side="left", padx=(6, 16))
+        ParagonLabel(moderow, text="Audio format", style="muted", anchor="w").pack(side="left")
+        self.audio_format_var = ctk.StringVar(value=cfg.get("harvester_audio_format", "mp3"))
+        ParagonOptionMenu(moderow, values=["mp3", "m4a", "ogg"],
+                          variable=self.audio_format_var, width=80).pack(side="left", padx=(6, 16))
+        ParagonLabel(moderow, text="Audio quality", style="muted", anchor="w").pack(side="left")
+        self.audio_bitrate_var = ctk.StringVar(value=cfg.get("harvester_audio_bitrate", "Best"))
+        ParagonOptionMenu(moderow, values=["Best", "320", "256", "192", "128", "64"],
+                          variable=self.audio_bitrate_var, width=80).pack(side="left", padx=(6, 8))
+        ParagonLabel(moderow, text="kbps (used in Audio-only mode)",
+                     style="muted", anchor="w").pack(side="left")
 
         opt = ctk.CTkFrame(dl, fg_color="transparent")
         opt.pack(fill="x", padx=12, pady=(0, 6))
@@ -18182,6 +18203,10 @@ class HarvesterDialog(ctk.CTkToplevel):
         res = self.res_var.get()
         resolution = None if res == "Best" else res
         container = self.container_var.get()
+        audio_only = self.mode_var.get() == "Audio only"
+        audio_format = self.audio_format_var.get()
+        _br = self.audio_bitrate_var.get()
+        audio_quality = "0" if _br == "Best" else f"{_br}K"
         use_archive = force_archive or self.skip_var.get()
         archive = os.path.join(source, ".paragon_archive.txt") if use_archive else None
         whole_playlist = self.whole_playlist_var.get()
@@ -18221,7 +18246,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                         whole_playlist=whole_playlist,
                         cookies_from_browser=cookies_from_browser,
                         prefer_h264=prefer_h264, cookies_file=cookies_file,
-                        extra_args=extra_args)
+                        extra_args=extra_args, audio_only=audio_only,
+                        audio_format=audio_format, audio_quality=audio_quality)
                     dl_ok += ok; dl_fail += fail
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")

@@ -1301,7 +1301,9 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
                              archive_file=None, no_playlist=False,
                              cookies_from_browser=None, js_runtime=None,
                              js_runtime_path=None, prefer_h264=True,
-                             cookies_file=None, extra_args=None):
+                             cookies_file=None, extra_args=None,
+                             audio_only=False, audio_format="mp3",
+                             audio_quality="0"):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
@@ -1309,32 +1311,43 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
     videos (subscription-style 'only new'). no_playlist forces just the single
     video (used for watch URLs that carry a '&list=' mix). cookies_from_browser
     (e.g. 'chrome'/'firefox'/'edge'/'brave') passes browser cookies to work
-    around 'HTTP 403 Forbidden' anti-bot blocks."""
+    around 'HTTP 403 Forbidden' anti-bot blocks. audio_only extracts just the
+    audio track: audio_format is 'mp3'/'m4a'/'ogg' and audio_quality is a yt-dlp
+    --audio-quality value ('0' = best VBR, or a bitrate like '320K')."""
     # Save as <source>/<Channel>/<Title> [<id>].<ext>
     outtmpl = os.path.join(source_folder, "%(uploader)s", "%(title)s [%(id)s].%(ext)s")
 
-    if resolution:
-        fmt = f"bv*[height<={resolution}]+ba/b[height<={resolution}]"
+    cmd = ["yt-dlp"]
+    if audio_only:
+        # Grab the best audio stream and transcode to the requested audio
+        # format/bitrate (needs ffmpeg). No video sort/merge/remux applies.
+        cmd += [
+            "-f", "bestaudio/best",
+            "-x",
+            "--audio-format", audio_format,
+            "--audio-quality", audio_quality,
+        ]
     else:
-        fmt = "bv*+ba/b"
-
-    cmd = [
-        "yt-dlp",
-        "-f", fmt,
-    ]
-    # Prefer H.264 (avc1) video and AAC audio. YouTube's high formats are often
-    # AV1 (itags 399/400/401), which many players and Kodi hardware decoders
-    # can't render -> audio plays but the picture is black. H.264 is universally
-    # compatible. Falls back to whatever's available if H.264 isn't offered.
-    if prefer_h264:
-        cmd += ["-S", "vcodec:h264,res,acodec:aac"]
+        if resolution:
+            fmt = f"bv*[height<={resolution}]+ba/b[height<={resolution}]"
+        else:
+            fmt = "bv*+ba/b"
+        cmd += ["-f", fmt]
+        # Prefer H.264 (avc1) video and AAC audio. YouTube's high formats are
+        # often AV1 (itags 399/400/401), which many players and Kodi hardware
+        # decoders can't render -> audio plays but the picture is black. H.264 is
+        # universally compatible. Falls back to whatever's available.
+        if prefer_h264:
+            cmd += ["-S", "vcodec:h264,res,acodec:aac"]
+        cmd += [
+            "--merge-output-format", container,
+            # merge-output-format only applies when streams are merged;
+            # remux-video also converts a single/already-combined format so the
+            # final file always matches the chosen container. No-op if already
+            # in the target container.
+            "--remux-video", container,
+        ]
     cmd += [
-        "--merge-output-format", container,
-        # merge-output-format only applies when streams are merged; remux-video
-        # also converts a single/already-combined format so the final file
-        # always matches the chosen container (e.g. mkv, not mp4). Both are
-        # no-ops when the file is already in the target container.
-        "--remux-video", container,
         "-o", outtmpl,
         "--no-overwrites",
         "--ignore-errors",       # one bad item shouldn't abort a playlist/channel
@@ -1378,7 +1391,8 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
 def download_urls(urls, source_folder, resolution=None, container="mkv",
                   archive_file=None, should_stop=None, whole_playlist=False,
                   cookies_from_browser=None, prefer_h264=True, cookies_file=None,
-                  extra_args=None):
+                  extra_args=None, audio_only=False, audio_format="mp3",
+                  audio_quality="0"):
     """Download each URL (video, playlist, or channel) into source_folder via
     yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
     should_stop, if given, is polled to allow cancelling between and during
@@ -1429,7 +1443,10 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                                        js_runtime_path=js_runtime_path,
                                        prefer_h264=prefer_h264,
                                        cookies_file=cookies_file,
-                                       extra_args=extra_args)
+                                       extra_args=extra_args,
+                                       audio_only=audio_only,
+                                       audio_format=audio_format,
+                                       audio_quality=audio_quality)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)
