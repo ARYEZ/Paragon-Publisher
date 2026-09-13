@@ -17650,6 +17650,7 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_whole_playlist"] = self.whole_playlist_var.get()
             cfg["harvester_cookies"] = self.cookies_var.get()
             cfg["harvester_cookies_file"] = self.cookies_file_entry.get().strip()
+            cfg["harvester_extra_args"] = self.extra_args_entry.get().strip()
             cfg["harvester_codec"] = self.codec_var.get()
             cfg["harvester_subscriptions"] = self._subscriptions
             with open(self.CONFIG_PATH, "w") as f:
@@ -17794,6 +17795,18 @@ class HarvesterDialog(ctk.CTkToplevel):
         ParagonSecondaryButton(cf, text="Browse", width=90,
                                command=self._browse_cookies_file).pack(side="left")
         ParagonLabel(cf, text="cookies.txt (overrides browser)",
+                     style="muted", anchor="w").pack(side="left", padx=(8, 0))
+
+        # Escape hatch: extra yt-dlp args appended verbatim (e.g.
+        # --extractor-args "youtube:player_client=web_safari"). Lets you adapt to
+        # YouTube changes without a code update.
+        ea = ctk.CTkFrame(dl, fg_color="transparent")
+        ea.pack(fill="x", padx=12, pady=(0, 6))
+        ParagonLabel(ea, text="Extra args", style="muted", width=90, anchor="w").pack(side="left")
+        self.extra_args_entry = ParagonEntry(ea)
+        self.extra_args_entry.insert(0, cfg.get("harvester_extra_args", ""))
+        self.extra_args_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        ParagonLabel(ea, text="raw yt-dlp flags (advanced)",
                      style="muted", anchor="w").pack(side="left", padx=(8, 0))
 
         dl_btns = ctk.CTkFrame(dl, fg_color="transparent")
@@ -18109,6 +18122,11 @@ class HarvesterDialog(ctk.CTkToplevel):
         cookies = self.cookies_var.get()
         cookies_from_browser = None if cookies == "none" else cookies
         cookies_file = self.cookies_file_entry.get().strip() or None
+        try:
+            import shlex
+            extra_args = shlex.split(self.extra_args_entry.get().strip())
+        except Exception:
+            extra_args = self.extra_args_entry.get().split()
         prefer_h264 = self.codec_var.get().startswith("H.264")
         try:
             repeat_min = int(self.repeat_entry.get().strip() or "0")
@@ -18136,7 +18154,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                         archive_file=archive, should_stop=self._stop_event.is_set,
                         whole_playlist=whole_playlist,
                         cookies_from_browser=cookies_from_browser,
-                        prefer_h264=prefer_h264, cookies_file=cookies_file)
+                        prefer_h264=prefer_h264, cookies_file=cookies_file,
+                        extra_args=extra_args)
                     dl_ok += ok; dl_fail += fail
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")
