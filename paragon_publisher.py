@@ -9233,6 +9233,68 @@ class TVScraperDialog(ctk.CTkToplevel):
 
 
 
+# =========================================================================
+# Library sort helpers (shared by the TV / Movie / Music library dialogs)
+# =========================================================================
+LIBRARY_SORT_OPTIONS = ["Alphabetical", "Date added"]
+
+
+def _sort_mode_from_label(label):
+    """Map a dropdown label to an internal sort mode ('name' or 'date')."""
+    return "date" if (label or "").lower().startswith("date") else "name"
+
+
+def _library_sort_label(mode):
+    """Map an internal sort mode back to its dropdown label."""
+    return "Date added" if mode == "date" else "Alphabetical"
+
+
+def _sort_library_items(items, mode):
+    """Return a new list of library item dicts sorted by the given mode.
+
+    'date' sorts by the folder's modification time, newest first (so freshly
+    added shows/movies/artists appear at the top). Anything else sorts
+    alphabetically by name. Items lacking a readable path fall back to 0 so a
+    missing folder never breaks the sort.
+    """
+    if mode == "date":
+        def _mtime(it):
+            try:
+                return os.path.getmtime(it.get('path', ''))
+            except OSError:
+                return 0.0
+        return sorted(items, key=_mtime, reverse=True)
+    return sorted(items, key=lambda it: (it.get('name', '') or '').lower())
+
+
+def _get_library_sort():
+    """Read the shared library sort preference from the config file."""
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        if p.exists():
+            with open(p, "r") as f:
+                mode = json.load(f).get("library_sort", "name")
+                return mode if mode in ("name", "date") else "name"
+    except Exception:
+        pass
+    return "name"
+
+
+def _set_library_sort(mode):
+    """Persist the shared library sort preference to the config file."""
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        cfg = {}
+        if p.exists():
+            with open(p, "r") as f:
+                cfg = json.load(f)
+        cfg["library_sort"] = mode
+        with open(p, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+
 class TVLibraryDialog(ctk.CTkToplevel):
     """MediaElch-style TV Library browser for managing multiple TV shows"""
     
@@ -9243,7 +9305,8 @@ class TVLibraryDialog(ctk.CTkToplevel):
         self.shows = []
         self.selected_show = None
         self.show_widgets = {}
-        
+        self._sort_mode = _get_library_sort()
+
         self.title("TV Library")
         self.geometry("1400x850")
         self.configure(fg_color=ParagonTheme.BG_DARK)
@@ -9306,7 +9369,18 @@ class TVLibraryDialog(ctk.CTkToplevel):
                                         font=ctk.CTkFont(size=18), height=40)
         self.filter_entry.pack(fill="x")
         self.filter_entry.bind('<KeyRelease>', lambda e: self._filter_shows())
-        
+
+        # Sort
+        sort_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
+        sort_frame.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(sort_frame, text="Sort:", text_color=ParagonTheme.TEXT_SECONDARY,
+                     font=ctk.CTkFont(size=14)).pack(side="left", padx=(0, 8))
+        self.sort_menu = ParagonOptionMenu(
+            sort_frame, values=LIBRARY_SORT_OPTIONS, command=self._on_sort_change,
+            width=170)
+        self.sort_menu.set(_library_sort_label(self._sort_mode))
+        self.sort_menu.pack(side="left")
+
         # Show count
         self.count_label = ctk.CTkLabel(left_panel, text="0 TV Shows",
                                         text_color=ParagonTheme.TEXT_SECONDARY,
@@ -9339,13 +9413,29 @@ class TVLibraryDialog(ctk.CTkToplevel):
     def _load_library(self):
         cached = LibraryCache.load_cache('tv', self.library_path)
         if cached:
-            self.shows = cached
+            self.shows = _sort_library_items(cached, self._sort_mode)
             self.status_label.configure(text=f"Loaded {len(cached)} shows (cached)")
             self.count_label.configure(text=f"{len(cached)} TV SHOWS")
-            for show in cached:
+            for show in self.shows:
                 self._add_show_item(show)
         else:
             self._rescan()
+
+    def _on_sort_change(self, label):
+        """Handle a change in the sort dropdown: re-sort and rebuild the list."""
+        self._sort_mode = _sort_mode_from_label(label)
+        _set_library_sort(self._sort_mode)
+        self._apply_sort()
+
+    def _apply_sort(self):
+        """Re-sort the stored shows and rebuild the list widgets in that order."""
+        self.shows = _sort_library_items(self.shows, self._sort_mode)
+        for widget in self.show_list.winfo_children():
+            widget.destroy()
+        self.show_widgets = {}
+        for show in self.shows:
+            self._add_show_item(show)
+        self._filter_shows()
     
     def _rescan(self):
         """Rescan the library folder"""
@@ -9447,10 +9537,10 @@ class TVLibraryDialog(ctk.CTkToplevel):
         }
     
     def _on_scan_complete(self, shows):
-        self.shows = shows
+        self.shows = _sort_library_items(shows, self._sort_mode)
         self.status_label.configure(text=f"Found {len(shows)} shows")
         self.count_label.configure(text=f"{len(shows)} TV SHOWS")
-        for show in shows:
+        for show in self.shows:
             self._add_show_item(show)
     
     def _add_show_item(self, show):
@@ -10109,7 +10199,8 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         self.movies = []  # List of {name, path, year, has_nfo, poster_path, etc}
         self.selected_movie = None
         self.movie_widgets = {}
-        
+        self._sort_mode = _get_library_sort()
+
         self.title("Movie Library")
         self.geometry("1400x850")
         self.configure(fg_color=ParagonTheme.BG_DARK)
@@ -10175,7 +10266,18 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                                         font=ctk.CTkFont(size=18), height=40)
         self.filter_entry.pack(fill="x")
         self.filter_entry.bind('<KeyRelease>', lambda e: self._filter_movies())
-        
+
+        # Sort
+        sort_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
+        sort_frame.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(sort_frame, text="Sort:", text_color=ParagonTheme.TEXT_SECONDARY,
+                     font=ctk.CTkFont(size=14)).pack(side="left", padx=(0, 8))
+        self.sort_menu = ParagonOptionMenu(
+            sort_frame, values=LIBRARY_SORT_OPTIONS, command=self._on_sort_change,
+            width=170)
+        self.sort_menu.set(_library_sort_label(self._sort_mode))
+        self.sort_menu.pack(side="left")
+
         # Movie count
         self.movie_count_label = ctk.CTkLabel(left_panel, text="0 Movies",
                                              text_color=ParagonTheme.TEXT_SECONDARY,
@@ -10339,12 +10441,24 @@ class MovieLibraryDialog(ctk.CTkToplevel):
             'has_logo': has_logo,
         }
     
+    def _on_sort_change(self, label):
+        """Handle a change in the sort dropdown: re-sort and rebuild the list."""
+        self._sort_mode = _sort_mode_from_label(label)
+        _set_library_sort(self._sort_mode)
+        self._apply_sort()
+
+    def _apply_sort(self):
+        """Re-sort the stored movies and rebuild the list in that order."""
+        self._populate_movie_list(self.movies)
+        self._filter_movies()
+
     def _populate_movie_list(self, movies: List[Dict]):
         """Populate the movie list with scanned movies"""
         # Check if dialog still exists
         if not self.winfo_exists():
             return
-            
+
+        movies = _sort_library_items(movies, self._sort_mode)
         self.movies = movies
         
         # Clear existing
@@ -10675,7 +10789,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self.selected_album = None
         self.artist_widgets = {}
         self.album_widgets = {}
-        
+        self._sort_mode = _get_library_sort()
+
         self.title("Music Library")
         self.geometry("1500x900")
         self.configure(fg_color=ParagonTheme.BG_DARK)
@@ -10741,7 +10856,18 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                                         font=ctk.CTkFont(size=16), height=36)
         self.artist_filter_entry.pack(fill="x")
         self.artist_filter_entry.bind('<KeyRelease>', lambda e: self._filter_artists())
-        
+
+        # Sort
+        sort_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
+        sort_frame.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(sort_frame, text="Sort:", text_color=ParagonTheme.TEXT_SECONDARY,
+                     font=ctk.CTkFont(size=14)).pack(side="left", padx=(0, 8))
+        self.sort_menu = ParagonOptionMenu(
+            sort_frame, values=LIBRARY_SORT_OPTIONS, command=self._on_sort_change,
+            width=170)
+        self.sort_menu.set(_library_sort_label(self._sort_mode))
+        self.sort_menu.pack(side="left")
+
         # Artist count
         self.artist_count_label = ctk.CTkLabel(left_panel, text="0 Artists",
                                              text_color=ParagonTheme.TEXT_SECONDARY,
@@ -10907,12 +11033,24 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             'has_artist_image': has_artist_image,
         }
     
+    def _on_sort_change(self, label):
+        """Handle a change in the sort dropdown: re-sort and rebuild the list."""
+        self._sort_mode = _sort_mode_from_label(label)
+        _set_library_sort(self._sort_mode)
+        self._apply_sort()
+
+    def _apply_sort(self):
+        """Re-sort the stored artists and rebuild the list in that order."""
+        self._populate_artist_list(self.artists)
+        self._filter_artists()
+
     def _populate_artist_list(self, artists: List[Dict]):
         """Populate the artist list with scanned artists"""
         # Check if dialog still exists
         if not self.winfo_exists():
             return
-            
+
+        artists = _sort_library_items(artists, self._sort_mode)
         self.artists = artists
         
         # Clear existing
