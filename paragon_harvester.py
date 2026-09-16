@@ -93,6 +93,23 @@ def normalize_fullwidth(text):
         text = text.replace(fw, ascii_ch)
     return text
 
+# Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
+# human-readable title (and kept in NFO text) but must be stripped from the
+# on-disk name, or os.rename fails with WinError 123.
+INVALID_FILENAME_CHARS = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+
+def sanitize_filename(text):
+    """Make a title safe to use as a filename component: fold fullwidth
+    stand-ins to ASCII, drop characters illegal in a filename, and collapse
+    whitespace. Only the on-disk name is sanitised; the readable title (with
+    ':' etc.) is preserved for NFO text."""
+    if not text:
+        return text
+    text = normalize_fullwidth(text)
+    for ch in INVALID_FILENAME_CHARS:
+        text = text.replace(ch, '')
+    return ' '.join(text.split()).strip()
+
 def clean_title(title):
     return strip_4byte_chars(title.strip().title())
 
@@ -517,21 +534,13 @@ def rename_to_extended_format(video_path, show_name, genre):
         if audio_channels_elem is not None and audio_channels_elem.text:
             audio_channels = audio_channels_elem.text
         
-        # Sanitize filename components
-        def sanitize(text):
-            # Fold fullwidth stand-ins to ASCII first so they get stripped too,
-            # then remove characters that are invalid in a Windows filename.
-            text = normalize_fullwidth(text)
-            invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
-            for char in invalid_chars:
-                text = text.replace(char, '')
-            return text.strip()
-        
-        episode_title = sanitize(episode_title)
-        show_name = sanitize(show_name)
+        # Sanitize filename components (shared helper folds fullwidth glyphs and
+        # strips characters illegal in a filename).
+        episode_title = sanitize_filename(episode_title)
+        show_name = sanitize_filename(show_name)
         if not genre:
             genre = "Unknown"
-        genre = sanitize(genre)
+        genre = sanitize_filename(genre)
         
         # Build new filename
         new_base = f"{season_num}x{episode_num} - {episode_title} - {show_name} - {genre} - {resolution} - {audio_channels} - {audio_codec} - None"
@@ -872,7 +881,11 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
     season = show_data[show_key]["season"]
     episode = show_data[show_key]["episode"]
     base, ext = os.path.splitext(os.path.basename(new_file_path))
-    new_filename = f"S{season:02d}E{episode:02d} - {episode_title}{ext}"
+    # Strip filename-illegal characters (e.g. the ':' clean_episode_title keeps)
+    # so the rename can't fail with WinError 123. The readable title with its
+    # punctuation still goes into the NFO below.
+    safe_title = sanitize_filename(episode_title)
+    new_filename = f"S{season:02d}E{episode:02d} - {safe_title}{ext}"
     renamed_file_path = os.path.join(show_folder, new_filename)
 
     if os.path.exists(renamed_file_path):
