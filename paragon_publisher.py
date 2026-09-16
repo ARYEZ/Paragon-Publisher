@@ -17581,44 +17581,97 @@ class NewShowDialog(ctk.CTkToplevel):
 
 
 class SubscriptionsDialog(ctk.CTkToplevel):
-    """Manage the saved channel-subscription list (one URL per line)."""
+    """Manage saved channel subscriptions: add/remove channels, reset one
+    channel's archive, and see a channel count + last-pulled time."""
 
-    def __init__(self, parent, subs, on_save):
+    def __init__(self, parent, subs, on_change, on_reset, last_pulled=""):
         super().__init__(parent)
-        self._on_save = on_save
+        self._subs = list(subs)
+        self._on_change = on_change
+        self._on_reset = on_reset
+        self._last_pulled = last_pulled or "never"
         self.title("Subscriptions")
-        self.geometry("620x460")
+        self.geometry("700x560")
         self.configure(fg_color=ParagonTheme.BG_DARK)
         self.transient(parent)
 
         wrap = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
         wrap.pack(fill="both", expand=True, padx=16, pady=16)
         ParagonLabel(wrap, text="⭐ Channel Subscriptions", style="header").pack(anchor="w")
-        ParagonLabel(wrap, text="One channel URL or @handle per line. 'Pull New (Subs)' "
-                     "downloads only new uploads from all of them.",
-                     style="muted", anchor="w").pack(fill="x", pady=(0, 10))
+        self.info_label = ParagonLabel(wrap, text="", style="muted", anchor="w")
+        self.info_label.pack(fill="x", pady=(0, 8))
+        ParagonLabel(wrap, text="'Pull New (Subs)' downloads only new uploads from these. "
+                     "'Reset archive' re-fetches one channel next pull.",
+                     style="muted", anchor="w").pack(fill="x", pady=(0, 8))
 
-        self.box = ctk.CTkTextbox(wrap, fg_color=ParagonTheme.BG_TERTIARY,
-                                  text_color=ParagonTheme.TEXT_PRIMARY,
-                                  font=ctk.CTkFont(family="Consolas", size=12))
-        self.box.pack(fill="both", expand=True)
-        self.box.insert("1.0", "\n".join(subs))
+        self.list_frame = ctk.CTkScrollableFrame(wrap, fg_color=ParagonTheme.BG_TERTIARY)
+        self.list_frame.pack(fill="both", expand=True)
+
+        addrow = ctk.CTkFrame(wrap, fg_color="transparent")
+        addrow.pack(fill="x", pady=(10, 0))
+        self.add_entry = ParagonEntry(addrow)
+        self.add_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.add_entry.bind("<Return>", lambda e: self._add())
+        ParagonButton(addrow, text="ADD", width=90, command=self._add).pack(side="left")
 
         btns = ctk.CTkFrame(wrap, fg_color="transparent")
-        btns.pack(fill="x", pady=(12, 0))
-        ParagonButton(btns, text="SAVE", command=self._save, width=120).pack(side="right", padx=(10, 0))
-        ParagonSecondaryButton(btns, text="CANCEL", command=self.destroy,
-                               width=120).pack(side="right")
+        btns.pack(fill="x", pady=(10, 0))
+        ParagonSecondaryButton(btns, text="CLOSE", command=self._close, width=120).pack(side="right")
+
+        self._rebuild()
         self.after(50, lambda: self.grab_set() if self.winfo_exists() else None)
 
-    def _save(self):
-        subs = [ln.strip() for ln in self.box.get("1.0", "end").splitlines() if ln.strip()]
+    def _rebuild(self):
+        for child in self.list_frame.winfo_children():
+            child.destroy()
+        if not self._subs:
+            ParagonLabel(self.list_frame,
+                         text="No channels yet - add a channel URL or @handle below.",
+                         style="muted", anchor="w").pack(fill="x", padx=8, pady=8)
+        for url in list(self._subs):
+            row = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+            row.pack(fill="x", padx=4, pady=2)
+            ParagonLabel(row, text=url, anchor="w").pack(
+                side="left", fill="x", expand=True, padx=(4, 8))
+            ParagonSecondaryButton(row, text="Reset archive", width=120, height=28,
+                                   command=lambda u=url: self._reset(u)).pack(side="left", padx=(0, 6))
+            ParagonSecondaryButton(row, text="✕", width=36, height=28,
+                                   command=lambda u=url: self._remove(u)).pack(side="left")
+        self.info_label.configure(
+            text="%d channel%s   ·   last pulled: %s"
+            % (len(self._subs), "" if len(self._subs) == 1 else "s", self._last_pulled))
+
+    def _add(self):
+        url = self.add_entry.get().strip()
+        if url and url not in self._subs:
+            self._subs.append(url)
+            self.add_entry.delete(0, "end")
+            self._changed()
+
+    def _remove(self, url):
+        if url in self._subs:
+            self._subs.remove(url)
+            self._changed()
+
+    def _reset(self, url):
+        if messagebox.askyesno(
+                "Reset archive",
+                "Re-pull this channel from scratch?\n\n%s\n\nThis clears that channel's "
+                "entries from the download archive so the next Pull New fetches its videos "
+                "again. Other channels are untouched." % url, parent=self):
+            if self._on_reset:
+                self._on_reset(url)
+
+    def _changed(self):
+        self._rebuild()
+        if self._on_change:
+            self._on_change(list(self._subs))
+
+    def _close(self):
         try:
             self.grab_release()
         except Exception:
             pass
-        if self._on_save:
-            self._on_save(subs)
         self.destroy()
 
 
@@ -17651,6 +17704,7 @@ class HarvesterDialog(ctk.CTkToplevel):
 
         cfg = self._load_config()
         self._subscriptions = cfg.get("harvester_subscriptions", []) or []
+        self._subs_last_pulled = cfg.get("harvester_subs_last_pulled", "")
 
         self._create_ui(cfg)
 
@@ -17697,6 +17751,7 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_extra_args"] = self.extra_args_entry.get().strip()
             cfg["harvester_codec"] = self.codec_var.get()
             cfg["harvester_subscriptions"] = self._subscriptions
+            cfg["harvester_subs_last_pulled"] = getattr(self, "_subs_last_pulled", "")
             with open(self.CONFIG_PATH, "w") as f:
                 json.dump(cfg, f)
         except Exception:
@@ -18302,17 +18357,40 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._worker.start()
 
     def _manage_subscriptions(self):
-        def on_save(subs):
+        def on_change(subs):
             self._subscriptions = subs
             self._save_config()
-            self._append_log(f"Saved {len(subs)} subscription(s).")
-        SubscriptionsDialog(self, list(self._subscriptions), on_save)
+        SubscriptionsDialog(self, list(self._subscriptions), on_change,
+                            self._reset_channel_archive,
+                            getattr(self, "_subs_last_pulled", "") or "never")
+
+    def _reset_channel_archive(self, url):
+        source = self.source_entry.get().strip()
+        if not source:
+            messagebox.showwarning("No source folder",
+                                   "Set a source folder first (that's where the archive lives).",
+                                   parent=self)
+            return
+        archive = os.path.join(source, ".paragon_archive.txt")
+        cookies = self.cookies_var.get()
+        cookies_from_browser = None if cookies == "none" else cookies
+        cookies_file = self.cookies_file_entry.get().strip() or None
+        self._append_log("Resetting archive for %s ..." % url)
+
+        def work():
+            paragon_harvester.reset_channel_archive(
+                archive, url, cookies_file=cookies_file,
+                cookies_from_browser=cookies_from_browser, log_cb=self._log)
+        threading.Thread(target=work, daemon=True).start()
 
     def _pull_subscriptions(self):
         if not self._subscriptions:
             messagebox.showinfo("No Subscriptions",
                                 "Add channel URLs first via ⭐ SUBSCRIPTIONS.", parent=self)
             return
+        import time as _time
+        self._subs_last_pulled = _time.strftime("%Y-%m-%d %H:%M", _time.localtime())
+        self._save_config()
         # Pull only-new (force the archive on) and organize in one pass.
         self._start_download(True, urls=list(self._subscriptions), force_archive=True)
 

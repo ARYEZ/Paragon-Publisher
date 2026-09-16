@@ -1492,6 +1492,69 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
     log(f"\nDownload finished. {ok} URL(s) ok, {fail} with errors.")
     return (ok, fail)
 
+
+def list_channel_video_ids(url, cookies_file=None, cookies_from_browser=None, log_cb=None):
+    """Return the set of video IDs for a channel/playlist URL. Uses a flat
+    listing (metadata only, fast, no media download). Empty set on failure."""
+    logf = log_cb or (lambda *a: None)
+    if not YTDLP_AVAILABLE:
+        logf("yt-dlp not found.")
+        return set()
+    cmd = ["yt-dlp", "--flat-playlist", "--print", "%(id)s",
+           "--ignore-errors", "--no-warnings"]
+    if cookies_file:
+        cmd += ["--cookies", cookies_file]
+    elif cookies_from_browser:
+        cmd += ["--cookies-from-browser", cookies_from_browser]
+    cmd.append(url)
+    try:
+        out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             universal_newlines=True, timeout=180)
+        return set(line.strip() for line in out.stdout.splitlines()
+                   if line.strip() and not line.startswith("["))
+    except Exception as e:
+        logf("Could not list channel: %s" % e)
+        return set()
+
+
+def reset_channel_archive(archive_file, channel_url, cookies_file=None,
+                          cookies_from_browser=None, log_cb=None):
+    """Remove one channel's videos from the download archive so 'Pull New'
+    fetches them again, leaving every other channel's entries in place. Returns
+    the number of archive lines removed, or -1 if the channel couldn't be listed
+    (in which case the archive is left untouched)."""
+    logf = log_cb or print
+    if not archive_file or not os.path.exists(archive_file):
+        logf("No archive file at %s - nothing to reset." % archive_file)
+        return 0
+    ids = list_channel_video_ids(channel_url, cookies_file, cookies_from_browser, logf)
+    if not ids:
+        logf("Could not list videos for %s; archive left unchanged." % channel_url)
+        return -1
+    try:
+        with open(archive_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as e:
+        logf("Could not read archive: %s" % e)
+        return -1
+    kept, removed = [], 0
+    for line in lines:
+        parts = line.split()
+        vid = parts[-1] if parts else ""
+        if vid in ids:
+            removed += 1
+        else:
+            kept.append(line)
+    try:
+        with open(archive_file, "w", encoding="utf-8") as f:
+            f.writelines(kept)
+    except OSError as e:
+        logf("Could not write archive: %s" % e)
+        return -1
+    logf("Reset %d archived video(s) for this channel." % removed)
+    return removed
+
+
 def sanitize_existing_nfos(root_folder):
     """Walk a folder and strip 4-byte characters from every .nfo in place.
 
