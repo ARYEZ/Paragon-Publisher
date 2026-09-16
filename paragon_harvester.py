@@ -69,6 +69,30 @@ def strip_4byte_chars(text):
         return text
     return ''.join(ch for ch in text if ord(ch) <= 0xFFFF)
 
+# YouTube substitutes fullwidth glyphs for characters that are illegal in a
+# filename (a real ':' becomes '：', '|' becomes '｜', and so on). Map them back
+# to ASCII so downstream cleanup can actually see them -- e.g. cut a title at
+# the first '|', or let sanitize() strip the ':'.
+FULLWIDTH_MAP = {
+    '：': ':',    # ： fullwidth colon
+    '｜': '|',    # ｜ fullwidth vertical bar
+    '？': '?',    # ？ fullwidth question mark
+    '＊': '*',    # ＊ fullwidth asterisk
+    '＂': '"',    # ＂ fullwidth quotation mark
+    '／': '/',    # ／ fullwidth solidus
+    '＼': '\\',   # ＼ fullwidth reverse solidus
+    '＜': '<',    # ＜ fullwidth less-than
+    '＞': '>',    # ＞ fullwidth greater-than
+}
+
+def normalize_fullwidth(text):
+    """Fold YouTube's fullwidth filename stand-ins back to ASCII punctuation."""
+    if not text:
+        return text
+    for fw, ascii_ch in FULLWIDTH_MAP.items():
+        text = text.replace(fw, ascii_ch)
+    return text
+
 def clean_title(title):
     return strip_4byte_chars(title.strip().title())
 
@@ -495,7 +519,9 @@ def rename_to_extended_format(video_path, show_name, genre):
         
         # Sanitize filename components
         def sanitize(text):
-            # Remove invalid Windows filename characters
+            # Fold fullwidth stand-ins to ASCII first so they get stripped too,
+            # then remove characters that are invalid in a Windows filename.
+            text = normalize_fullwidth(text)
             invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
             for char in invalid_chars:
                 text = text.replace(char, '')
@@ -586,14 +612,25 @@ def clean_episode_title(title):
     """Cleans up an episode title by removing extraneous information."""
     original_title = title
     log(f"DEBUG - Starting with title: '{title}'")
-    
+
+    # Fold YouTube's fullwidth stand-ins ('：', '｜', ...) back to ASCII so the
+    # steps below (the '|' cut, sanitising) can actually match them.
+    title = normalize_fullwidth(title)
+    log(f"DEBUG - After fullwidth normalize: '{title}'")
+
     # Remove text in various types of brackets
     title = re.sub(r'\s*\([^)]*\)', '', title)  # Remove parentheses
     title = re.sub(r'\s*\[[^\]]*\]', '', title)  # Remove square brackets
     title = re.sub(r'\s*\{[^}]*\}', '', title)  # Remove curly braces
     title = re.sub(r'\s*<[^>]*>', '', title)  # Remove angle brackets
-    
+
     log(f"DEBUG - After bracket removal: '{title}'")
+
+    # Cut everything from the first '|' onward. Music/ambient channels append a
+    # "Real Title | Genre & SEO keywords" tail; the pipe is the boundary.
+    if '|' in title:
+        title = title.split('|')[0]
+        log(f"DEBUG - After pipe cut: '{title}'")
     
     # For video suffixes, use a safer word boundary approach
     title = re.sub(r' official music video$', '', title, flags=re.IGNORECASE)
@@ -634,7 +671,30 @@ def clean_episode_title(title):
         title = title.split(' by ')[0]
     
     log(f"DEBUG - After featuring removal: '{title}'")
-        
+
+    # Drop a trailing SEO/keyword tail. Channels often append comma-separated
+    # descriptive phrases ("music to meditation, focus studying, sleep") after
+    # the real title. Keep the first segment always, then keep following
+    # segments until one looks like keyword padding, and cut there. This is
+    # conservative: a legit title like "Signal 05, Part 2" is left intact.
+    if ',' in title:
+        seo_keywords = (
+            'music to', 'music for', 'study', 'studying', 'sleep', 'relax',
+            'relaxing', 'focus', 'meditation', 'meditate', 'ambient',
+            'background', 'concentration', 'deep work', 'calm', 'chill',
+            'stress relief', 'insomnia', 'healing', 'for work', 'for studying',
+            'no copyright', 'royalty free', 'white noise', 'soundscape',
+        )
+        parts = title.split(',')
+        kept = [parts[0]]
+        for seg in parts[1:]:
+            low = seg.lower()
+            if any(kw in low for kw in seo_keywords):
+                break
+            kept.append(seg)
+        title = ','.join(kept)
+        log(f"DEBUG - After SEO tail removal: '{title}'")
+
     # Final cleanup
     title = ' '.join(title.split())  # Remove extra spaces
     if not title or len(title) < 3:
