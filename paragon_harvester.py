@@ -165,7 +165,8 @@ def search_youtube_by_title(title, channel=None):
             log(f"Searching YouTube for: {title}")
             cmd = ['yt-dlp', '--get-id', f'ytsearch1:{title}']
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace", timeout=30)
 
         if result.returncode == 0 and result.stdout.strip():
             # Channel search can return multiple IDs; take the first.
@@ -189,6 +190,8 @@ def get_youtube_metadata(video_id):
             ['yt-dlp', '--dump-json', '--no-download', f'https://www.youtube.com/watch?v={video_id}'],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30
         )
         
@@ -306,7 +309,8 @@ def get_video_stream_info(video_path):
             str(video_path)
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace", timeout=30)
         
         if result.returncode != 0:
             return None
@@ -1305,7 +1309,8 @@ def check_environment():
     if shutil.which("yt-dlp"):
         try:
             out = subprocess.run(["yt-dlp", "--version"], capture_output=True,
-                                 text=True, timeout=10)
+                                 text=True, encoding="utf-8", errors="replace",
+                                 timeout=10)
             if out.returncode == 0:
                 info["yt_dlp"] = out.stdout.strip()
         except Exception:
@@ -1317,7 +1322,8 @@ def get_installed_ytdlp_version():
         return None
     try:
         out = subprocess.run(["yt-dlp", "--version"], capture_output=True,
-                             text=True, timeout=10)
+                             text=True, encoding="utf-8", errors="replace",
+                             timeout=10)
         if out.returncode == 0:
             return out.stdout.strip()
     except Exception:
@@ -1352,7 +1358,8 @@ def update_ytdlp(log=None):
     logf("Updating yt-dlp (pip install -U yt-dlp)...")
     try:
         proc = subprocess.Popen([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace")
         for line in proc.stdout:
             logf(line.rstrip())
         proc.wait()
@@ -1533,7 +1540,8 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                                        date_after=date_after)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True)
+                                    stderr=subprocess.STDOUT, text=True,
+                                    encoding="utf-8", errors="replace")
         except Exception as e:
             log(f"  Failed to start yt-dlp: {e}")
             fail += 1
@@ -1582,7 +1590,8 @@ def list_channel_video_ids(url, cookies_file=None, cookies_from_browser=None, lo
     cmd.append(url)
     try:
         out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             universal_newlines=True, timeout=180)
+                             universal_newlines=True, encoding="utf-8",
+                             errors="replace", timeout=180)
         return set(line.strip() for line in out.stdout.splitlines()
                    if line.strip() and not line.startswith("["))
     except Exception as e:

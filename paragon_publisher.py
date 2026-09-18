@@ -7760,7 +7760,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
             import subprocess
             cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', self.current_file]
             print(f"Running ffprobe on: {self.current_file}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=10)
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 
@@ -12110,7 +12111,8 @@ class TVEditorDialog(ctk.CTkToplevel):
                     '-of', 'default=noprint_wrappers=1:nokey=1',
                     video_path
                 ]
-                result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                result = subprocess.run(probe_cmd, capture_output=True, text=True,
+                                        encoding="utf-8", errors="replace")
                 duration = float(result.stdout.strip()) if result.stdout.strip() else 0
                 
                 if duration <= 0:
@@ -12122,7 +12124,8 @@ class TVEditorDialog(ctk.CTkToplevel):
                         '-of', 'default=noprint_wrappers=1:nokey=1',
                         video_path
                     ]
-                    result2 = subprocess.run(probe_cmd2, capture_output=True, text=True)
+                    result2 = subprocess.run(probe_cmd2, capture_output=True, text=True,
+                                             encoding="utf-8", errors="replace")
                     duration = float(result2.stdout.strip()) if result2.stdout.strip() else 600
                 
                 # Pick a random time between 10% and 90% of the video
@@ -12143,8 +12146,9 @@ class TVEditorDialog(ctk.CTkToplevel):
                     '-q:v', '2',
                     temp_frame
                 ]
-                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-                
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True,
+                                        encoding="utf-8", errors="replace")
+
                 if result.returncode != 0 or not os.path.exists(temp_frame):
                     raise Exception(f"FFmpeg failed: {result.stderr}")
                 
@@ -13071,7 +13075,8 @@ class TVEditorDialog(ctk.CTkToplevel):
         try:
             import subprocess
             cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', self.current_file]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=10)
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 
