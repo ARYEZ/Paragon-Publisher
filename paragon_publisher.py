@@ -14249,7 +14249,12 @@ class PyRenamerApp(DnDCTk):
         def _preload():
             import time
             mnt_path = "/mnt"
-            
+
+            # /mnt is a Linux path; on Windows (and any box without it) there's
+            # nothing to preload, so skip silently instead of logging a failure.
+            if not os.path.isdir(mnt_path):
+                return
+
             try:
                 # Only preload /mnt itself - keep it light!
                 dirs = []
