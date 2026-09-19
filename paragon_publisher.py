@@ -18843,28 +18843,33 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
-    def _fix_titles_confirm(self, folder, changes):
+    def _fix_titles_confirm(self, folder, result):
         self._busy(False)
-        if not changes:
+        renames = result.get("renames", [])
+        plots = result.get("plots", [])
+        if not renames and not plots:
             messagebox.showinfo(
                 "Fix Titles",
-                "No episode titles need changing under:\n\n" + folder,
+                "Nothing needs cleaning under:\n\n" + folder,
                 parent=self)
             return
-        sample = "\n".join(f"  {old}\n     → {new}" for old, new in changes[:8])
-        more = f"\n\n…and {len(changes) - 8} more." if len(changes) > 8 else ""
+        lines = []
+        if renames:
+            lines.append(f"{len(renames)} file(s) will be renamed (and their NFOs updated):")
+            lines += [f"  {old}\n     → {new}" for old, new in renames[:6]]
+            if len(renames) > 6:
+                lines.append(f"  …and {len(renames) - 6} more.")
+        if plots:
+            lines.append(f"\n{len(plots)} NFO plot(s) will have decorative emoji removed.")
         if not messagebox.askyesno(
-                "Fix Titles",
-                f"{len(changes)} file(s) will be renamed and their NFO titles updated.\n\n"
-                f"{sample}{more}\n\nProceed?",
-                parent=self):
+                "Fix Titles", "\n".join(lines) + "\n\nProceed?", parent=self):
             return
         self._busy(True, monitoring=False)
         self._set_status("Fixing titles...")
 
         def work():
             paragon_harvester.set_logger(self._log)
-            done = []
+            done = {"renames": [], "plots": []}
             errored = False
             try:
                 done = paragon_harvester.retitle_extended_files(folder, apply=True)
@@ -18877,8 +18882,10 @@ class HarvesterDialog(ctk.CTkToplevel):
                 if self.winfo_exists():
                     self.after(0, lambda: self._busy(False))
                 if not errored:
-                    self._notify_complete("Fix Titles Complete",
-                                          f"Retitled {len(done)} file(s).")
+                    self._notify_complete(
+                        "Fix Titles Complete",
+                        f"Renamed {len(done.get('renames', []))} file(s), "
+                        f"cleaned {len(done.get('plots', []))} plot(s).")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 

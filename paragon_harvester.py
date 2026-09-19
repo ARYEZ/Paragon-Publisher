@@ -390,12 +390,13 @@ def best_playlist_match(fragment, entries):
 def clean_description(description, video_title, channel_name):
     """Clean up YouTube description by removing promotional content"""
     # Fold the Unicode replacement char ('�' from a failed byte decode) to a
-    # space in every field that can reach the plot, so a bad byte reads as a
-    # gap rather than a black diamond. The main path re-collapses whitespace
-    # below; the fallbacks are short enough that a stray gap is harmless.
-    description = (description or "").replace('�', ' ')
-    video_title = (video_title or "").replace('�', ' ').strip()
-    channel_name = (channel_name or "").replace('�', ' ').strip()
+    # space, and strip decorative emoji/symbols (✨ ✦ ...) that channels sprinkle
+    # through descriptions, so the plot reads as clean prose. For the raw
+    # description we replace emoji with a space (not strip_emoji) so the '\n'
+    # line breaks survive for the promo-line filtering below.
+    description = EMOJI_RE.sub(' ', (description or "").replace('�', ' '))
+    video_title = strip_emoji((video_title or "").replace('�', ' ')).strip()
+    channel_name = strip_emoji((channel_name or "").replace('�', ' ')).strip()
 
     if not description.strip():
         return f"{video_title} from {channel_name}"
@@ -2181,21 +2182,55 @@ def _clean_tvshow_nfo(nfo_path):
         except OSError:
             pass
 
-def retitle_extended_files(folder, apply=False):
-    """Re-clean the fields of already-processed extended-format files under
-    `folder`, without unprocessing them.
+_NFO_TEXT_TAGS = ("plot", "outline", "title", "showtitle")
 
-    Re-cleans the episode title (dash/emoji/SEO cuts) and re-sanitises the show
-    and genre fields (e.g. a stray '#'). For each file that changes, renames the
-    video and its sidecar .nfo and rewrites the NFO's title/showtitle/file; a
-    touched folder's tvshow.nfo is cleaned too. With apply=False it only reports
-    what would change. Returns a list of (old_basename, new_basename) tuples.
+def _scrub_text(inner):
+    """Remove emoji and replacement chars from NFO tag text, preserving XML
+    entities (so '&amp;' stays intact) and only collapsing the gaps that
+    removal leaves."""
+    out = EMOJI_RE.sub('', inner.replace('�', ''))
+    out = re.sub(r'[ \t]{2,}', ' ', out)
+    return out.strip()
+
+def _scrub_nfo(path, apply=True):
+    """Strip decorative emoji from an NFO's text tags (plot, title, ...) in
+    place. Returns True if it (would) change the file."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return False
+    def _fix(m):
+        return m.group(1) + _scrub_text(m.group(2)) + m.group(3)
+    new = data
+    for tag in _NFO_TEXT_TAGS:
+        new = re.sub(rf'(<{tag}[^>]*>)(.*?)(</{tag}>)', _fix, new, flags=re.DOTALL)
+    if new == data:
+        return False
+    if apply:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new)
+        except OSError:
+            return False
+    return True
+
+def retitle_extended_files(folder, apply=False):
+    """Re-clean already-processed extended-format files under `folder`, without
+    unprocessing them.
+
+    Two things: (1) re-clean the episode title (dash/bullet/emoji/SEO cuts) and
+    re-sanitise the show/genre fields (e.g. a stray '#'), renaming the video and
+    its .nfo and rewriting the NFO title/showtitle/file; (2) strip decorative
+    emoji from every NFO's <plot>/<title> text. With apply=False it only reports.
+    Returns {"renames": [(old, new), ...], "plots": [nfo_name, ...]}.
     """
-    changes = []
+    result = {"renames": [], "plots": []}
     if not os.path.isdir(folder):
         log(f"Folder not found: {folder}")
-        return changes
+        return result
     touched_dirs = set()
+    # Pass 1 -- rename files whose title/show/genre fields re-clean differently.
     for root, _, files in os.walk(folder):
         for fn in files:
             if not fn.lower().endswith(VIDEO_EXTENSIONS):
@@ -2213,8 +2248,8 @@ def retitle_extended_files(folder, apply=False):
             new_base = f"{prefix} - {safe_title} - {safe_show} - {safe_genre} - {res} - {ch} - {codec} - None"
             if new_base == os.path.splitext(fn)[0]:
                 continue  # nothing to change
-            changes.append((fn, new_base + ext))
             if not apply:
+                result["renames"].append((fn, new_base + ext))
                 continue
             old_stem = os.path.splitext(fn)[0]
             old_video = os.path.join(root, fn)
@@ -2223,7 +2258,6 @@ def retitle_extended_files(folder, apply=False):
             new_nfo = os.path.join(root, new_base + ".nfo")
             if os.path.exists(new_video) and os.path.normcase(new_video) != os.path.normcase(old_video):
                 log(f"  Skip (target exists): {new_base + ext}")
-                changes.pop()
                 continue
             try:
                 # Update the NFO first (while still at its old name), then rename
@@ -2233,17 +2267,25 @@ def retitle_extended_files(folder, apply=False):
                     os.rename(old_nfo, new_nfo)
                 os.rename(old_video, new_video)
                 touched_dirs.add(root)
+                result["renames"].append((fn, new_base + ext))
                 log(f"  Retitled: {fn}  ->  {new_base + ext}")
             except OSError as e:
                 log(f"  Error retitling {fn}: {e}")
-    # Clean the show-level tvshow.nfo in any folder we changed.
+    # Clean the show-level tvshow.nfo in folders we changed (# / title-case).
     if apply:
         for d in touched_dirs:
             tvnfo = os.path.join(d, "tvshow.nfo")
             if os.path.isfile(tvnfo):
                 _clean_tvshow_nfo(tvnfo)
-                changes.pop()
-    return changes
+    # Pass 2 -- strip decorative emoji from every NFO's plot/title text.
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if fn.lower().endswith(".nfo"):
+                if _scrub_nfo(os.path.join(root, fn), apply=apply):
+                    result["plots"].append(fn)
+                    if apply:
+                        log(f"  Cleaned plot text: {fn}")
+    return result
 
 def reset_show_counter(show_name):
     """Non-interactive episode-counter reset for the GUI.
