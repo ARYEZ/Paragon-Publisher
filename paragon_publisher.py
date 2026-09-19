@@ -18506,6 +18506,11 @@ class HarvesterDialog(ctk.CTkToplevel):
         channel = self.channel_entry.get().strip()
         nfo_handling = self.nfo_var.get()
         self._ask_each_pending = self.ask_each_var.get()
+        # Capture cookies on the main thread (tk vars mustn't be read from the
+        # worker) so the metadata/plot fetch can reach YouTube like the download.
+        _ck = self.cookies_var.get()
+        cookies_from_browser = None if _ck == "none" else _ck
+        cookies_file = self.cookies_file_entry.get().strip() or None
         self._stop_event.clear()
         self._busy(True, monitoring=False)
         self._set_status("Processing...")
@@ -18518,7 +18523,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                 processed = paragon_harvester.run_harvest(
                     source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                     channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
-                    should_stop=self._stop_event.is_set) or 0
+                    should_stop=self._stop_event.is_set,
+                    cookies_file=cookies_file, cookies_from_browser=cookies_from_browser) or 0
             except Exception as e:
                 errored = True
                 self._log(f"ERROR: {e}")
@@ -18626,7 +18632,9 @@ class HarvesterDialog(ctk.CTkToplevel):
                             source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                             channel=channel,
                             new_show_cb=self._make_new_show_cb(default_genre, channel),
-                            should_stop=self._stop_event.is_set) or 0
+                            should_stop=self._stop_event.is_set,
+                            cookies_file=cookies_file,
+                            cookies_from_browser=cookies_from_browser) or 0
                     if not repeat_min or self._stop_event.is_set():
                         break
                     self._set_status(f"Waiting {repeat_min} min for next run...")

@@ -179,7 +179,8 @@ def build_channel_search_url(channel, query):
     # Bare name -> treat as a handle
     return f"https://www.youtube.com/@{channel}/search?query={q}"
 
-def search_youtube_by_title(title, channel=None):
+def search_youtube_by_title(title, channel=None, cookies_file=None,
+                            cookies_from_browser=None):
     """Search YouTube for a video ID by title.
 
     If `channel` (a URL, @handle, or UC... ID) is given, the search is scoped
@@ -195,9 +196,10 @@ def search_youtube_by_title(title, channel=None):
         else:
             log(f"Searching YouTube for: {title}")
             cmd = ['yt-dlp', '--get-id', f'ytsearch1:{title}']
+        cmd[1:1] = _ytdlp_extractor_args(cookies_file, cookies_from_browser)
 
         result = subprocess.run(cmd, capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=30)
+                                 encoding="utf-8", errors="replace", timeout=60)
 
         if result.returncode == 0 and result.stdout.strip():
             # Channel search can return multiple IDs; take the first.
@@ -211,26 +213,62 @@ def search_youtube_by_title(title, channel=None):
     
     return None
 
-def get_youtube_metadata(video_id):
-    """Fetch metadata from YouTube using yt-dlp"""
+_JS_RUNTIME_CACHE = None
+
+def _ytdlp_extractor_args(cookies_file=None, cookies_from_browser=None):
+    """Args that let a metadata / search yt-dlp call reach YouTube the same way
+    the downloader does: a JS runtime + the EJS n-challenge solver, plus any
+    cookies. Without these a bare '--dump-json' is blocked ('Sign in to confirm
+    you're not a bot'), the call returns nothing, and the episode plot silently
+    falls back to the generic show summary."""
+    global _JS_RUNTIME_CACHE
+    if _JS_RUNTIME_CACHE is None:
+        _JS_RUNTIME_CACHE = detect_js_runtime()
+    js_runtime, js_runtime_path = _JS_RUNTIME_CACHE
+    args = []
+    if js_runtime and js_runtime_path:
+        args += ["--js-runtimes", f"{js_runtime}:{js_runtime_path}"]
+    elif js_runtime in ("node", "bun"):
+        args += ["--js-runtimes", js_runtime]
+    if js_runtime:
+        args += ["--remote-components", "ejs:github"]
+    if cookies_file:
+        args += ["--cookies", cookies_file]
+    elif cookies_from_browser:
+        args += ["--cookies-from-browser", cookies_from_browser]
+    return args
+
+def get_youtube_metadata(video_id, cookies_file=None, cookies_from_browser=None):
+    """Fetch metadata from YouTube using yt-dlp.
+
+    Uses the same JS-runtime / EJS-solver / cookie args as the downloader so the
+    metadata fetch isn't blocked while the download itself succeeds.
+    """
     if not video_id:
         return None
-    
+
+    cmd = ['yt-dlp', '--dump-json', '--no-download', '--no-warnings']
+    cmd += _ytdlp_extractor_args(cookies_file, cookies_from_browser)
+    cmd.append(f'https://www.youtube.com/watch?v={video_id}')
     try:
         result = subprocess.run(
-            ['yt-dlp', '--dump-json', '--no-download', f'https://www.youtube.com/watch?v={video_id}'],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30
+            timeout=60
         )
-        
-        if result.returncode == 0:
+
+        if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout)
+        # Surface why it failed so a blocked fetch isn't silent.
+        err = (result.stderr or "").strip().splitlines()
+        if err:
+            log(f"Warning: metadata fetch for {video_id} failed: {err[-1]}")
     except Exception as e:
         log(f"Warning: Could not fetch YouTube metadata: {e}")
-    
+
     return None
 
 def clean_description(description, video_title, channel_name):
@@ -771,7 +809,7 @@ def clean_episode_title(title):
     return strip_4byte_chars(title)
 
 def process_file(file_path, destination_folder, default_genre, nfo_handling, show_data, source_folder,
-                 new_show_cb=None):
+                 new_show_cb=None, cookies_file=None, cookies_from_browser=None):
     """Processes a single video file.
 
     new_show_cb, when given, makes the first-sighting of a show non-interactive
@@ -893,7 +931,7 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
     if video_id:
         # We already have the exact video; channel scoping is unnecessary.
         log(f"Found YouTube video ID in filename: {video_id}")
-        youtube_metadata = get_youtube_metadata(video_id)
+        youtube_metadata = get_youtube_metadata(video_id, cookies_file, cookies_from_browser)
     else:
         # No video ID found - search YouTube by title
         # Combine show name and episode title for better search
@@ -902,9 +940,10 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
             log(f"No video ID found, searching channel '{effective_channel}' for: '{search_query}'")
         else:
             log(f"No video ID found, searching YouTube for: '{search_query}'")
-        video_id = search_youtube_by_title(search_query, effective_channel)
+        video_id = search_youtube_by_title(search_query, effective_channel,
+                                           cookies_file, cookies_from_browser)
         if video_id:
-            youtube_metadata = get_youtube_metadata(video_id)
+            youtube_metadata = get_youtube_metadata(video_id, cookies_file, cookies_from_browser)
         else:
             log("Could not find video on YouTube, using generic metadata")
     
@@ -1159,7 +1198,8 @@ def _load_show_data(summary_file):
     return show_data
 
 def run_harvest(source_folder, destination_folder, default_genre="", nfo_handling="skip",
-                channel=None, new_show_cb=None, should_stop=None, summary_file=None):
+                channel=None, new_show_cb=None, should_stop=None, summary_file=None,
+                cookies_file=None, cookies_from_browser=None):
     """One-shot organize of every video under source_folder into destination_folder.
 
     Non-interactive: new_show_cb resolves per-show metadata (see process_file).
@@ -1202,7 +1242,8 @@ def run_harvest(source_folder, destination_folder, default_genre="", nfo_handlin
                 log(f"From folder: {os.path.relpath(root, source_folder)}")
                 try:
                     process_file(file_path, destination_folder, default_genre,
-                                 nfo_handling, show_data, source_folder, new_show_cb=new_show_cb)
+                                 nfo_handling, show_data, source_folder, new_show_cb=new_show_cb,
+                                 cookies_file=cookies_file, cookies_from_browser=cookies_from_browser)
                 except Exception as e:
                     log(f"Error processing {os.path.basename(file_path)}: {e}")
         if aborted:
