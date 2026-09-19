@@ -138,6 +138,17 @@ SEO_KEYWORDS = (
 # never part of a real episode name.
 DURATION_RE = re.compile(r'\b\d+\s*(?:hours?|hrs?|minutes?|mins?)\b', re.IGNORECASE)
 
+# En/em dash / horizontal bar used as a "Name — subtitle" separator. The plain
+# ASCII hyphen (U+002D) is intentionally excluded (real words like "Sci-Fi" use
+# it, and it's the extended-name field delimiter).
+DASH_RE = re.compile(r'[–—―]')
+
+def strip_hashes(text):
+    """Drop stray '#' (leaked hashtags) and collapse the whitespace left."""
+    if not text:
+        return text
+    return ' '.join(text.replace('#', ' ').split())
+
 # Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
 # human-readable title (and kept in NFO text) but must be stripped from the
 # on-disk name, or os.rename fails with WinError 123.
@@ -152,12 +163,16 @@ def sanitize_filename(text):
         return text
     text = normalize_fullwidth(text)
     text = EMOJI_RE.sub('', text)
+    text = text.replace('#', ' ')       # drop leaked hashtags
     for ch in INVALID_FILENAME_CHARS:
         text = text.replace(ch, '')
     return ' '.join(text.split()).strip()
 
 def clean_title(title):
-    return strip_4byte_chars(title.strip().title())
+    # Show/title text for NFOs and folders: ASCII-fold, drop emoji and stray
+    # hashtags, title-case, and keep it scan-safe.
+    cleaned = strip_hashes(strip_emoji(normalize_fullwidth(title or ""))).strip().title()
+    return strip_4byte_chars(cleaned)
 
 def extract_video_id(filename):
     """Extract YouTube video ID from filename [ID].ext format"""
@@ -809,6 +824,12 @@ def clean_episode_title(title):
         title = title.split('|')[0]
         log(f"DEBUG - After pipe cut: '{title}'")
 
+    # Same for an en/em dash separator ("Name — The Subtitle"): keep the name.
+    _dash = DASH_RE.search(title)
+    if _dash and title[:_dash.start()].strip():
+        title = title[:_dash.start()]
+        log(f"DEBUG - After dash cut: '{title}'")
+
     # Same idea for a decorative emoji separator ("Real Title ✨ SEO keywords") --
     # cut at the first emoji/symbol.
     _em = EMOJI_RE.search(title)
@@ -891,16 +912,16 @@ def clean_episode_title(title):
         title = ','.join(kept)
         log(f"DEBUG - After SEO tail removal: '{title}'")
 
-    # Drop any leftover decorative emoji/symbols anywhere in the title.
-    title = strip_emoji(title)
+    # Drop any leftover decorative emoji/symbols and stray hashtags.
+    title = strip_hashes(strip_emoji(title))
 
     # Final cleanup
     title = ' '.join(title.split())  # Remove extra spaces
     if not title or len(title) < 3:
-        # Fall back to the original with emoji stripped (so a title that was
-        # only "✨ Something" doesn't bring the black-diamond glyph back), and
-        # only to the raw original if even that is too short.
-        fallback = ' '.join(strip_emoji(original_title).split())
+        # Fall back to the original with emoji/hashes stripped (so a title that
+        # was only "✨ Something" doesn't bring the glyph back), and only to the
+        # raw original if even that is too short.
+        fallback = ' '.join(strip_hashes(strip_emoji(original_title)).split())
         title = fallback if len(fallback) >= 3 else original_title
         log(f"WARNING - Title cleaning too aggressive, reverting to: '{title}'")
 
@@ -2079,7 +2100,8 @@ def parse_extended_name(basename):
 
     Format: 'SSxEE - <episode title> - <show> - <genre> - <res> - <ch> - <codec> - None.ext'
     The title itself may contain ' - ', so the six fixed trailing fields are
-    peeled off from the right. Returns (prefix, episode_title, tail, ext).
+    peeled off from the right. Returns
+    (prefix, title, show, genre, res, ch, codec, ext).
     """
     stem, ext = os.path.splitext(basename)
     if ' - ' not in stem:
@@ -2090,10 +2112,11 @@ def parse_extended_name(basename):
     segs = rest.rsplit(' - ', 6)
     if len(segs) != 7 or segs[-1] != 'None':
         return None
-    return prefix, segs[0], ' - '.join(segs[1:]), ext
+    title, show, genre, res, ch, codec, _none = segs
+    return prefix, title, show, genre, res, ch, codec, ext
 
-def _rewrite_nfo_title(nfo_path, new_title, new_file_basename):
-    """Update the <title> (and <file>) of an existing episode NFO in place,
+def _rewrite_nfo_fields(nfo_path, new_title, new_show, new_file_basename):
+    """Update <title>/<showtitle>/<file> of an existing episode NFO in place,
     preserving the rest of the file byte-for-byte."""
     try:
         with open(nfo_path, "r", encoding="utf-8") as f:
@@ -2101,8 +2124,12 @@ def _rewrite_nfo_title(nfo_path, new_title, new_file_basename):
     except OSError:
         return
     esc_title = xml_escape(strip_4byte_chars(new_title))
+    esc_show = xml_escape(clean_title(new_show))
     data = re.sub(r'(<title>).*?(</title>)',
                   lambda m: m.group(1) + esc_title + m.group(2),
+                  data, count=1, flags=re.DOTALL)
+    data = re.sub(r'(<showtitle>).*?(</showtitle>)',
+                  lambda m: m.group(1) + esc_show + m.group(2),
                   data, count=1, flags=re.DOTALL)
     data = re.sub(r'(<file>).*?(</file>)',
                   lambda m: m.group(1) + xml_escape(new_file_basename) + m.group(2),
@@ -2113,19 +2140,42 @@ def _rewrite_nfo_title(nfo_path, new_title, new_file_basename):
     except OSError:
         pass
 
-def retitle_extended_files(folder, apply=False):
-    """Re-clean the episode-title field of already-processed extended-format
-    files under `folder`, without unprocessing them.
+def _clean_tvshow_nfo(nfo_path):
+    """Strip hashes/emoji from a tvshow.nfo's show-title fields in place."""
+    try:
+        with open(nfo_path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return
+    def _fix(m):
+        inner = re.sub(r'<[^>]+>', '', m.group(2))  # tag text only
+        cleaned = xml_escape(clean_title(inner))
+        return m.group(1) + cleaned + m.group(3)
+    new = data
+    for tag in ("title", "showtitle", "sorttitle", "originaltitle"):
+        new = re.sub(rf'(<{tag}[^>]*>)(.*?)(</{tag}>)', _fix, new, count=1, flags=re.DOTALL)
+    if new != data:
+        try:
+            with open(nfo_path, "w", encoding="utf-8") as f:
+                f.write(new)
+        except OSError:
+            pass
 
-    For each video whose title field changes under the current cleanup rules,
-    renames the video and its sidecar .nfo and rewrites the NFO's <title>/<file>.
-    With apply=False it only reports what would change. Returns a list of
-    (old_basename, new_basename) tuples.
+def retitle_extended_files(folder, apply=False):
+    """Re-clean the fields of already-processed extended-format files under
+    `folder`, without unprocessing them.
+
+    Re-cleans the episode title (dash/emoji/SEO cuts) and re-sanitises the show
+    and genre fields (e.g. a stray '#'). For each file that changes, renames the
+    video and its sidecar .nfo and rewrites the NFO's title/showtitle/file; a
+    touched folder's tvshow.nfo is cleaned too. With apply=False it only reports
+    what would change. Returns a list of (old_basename, new_basename) tuples.
     """
     changes = []
     if not os.path.isdir(folder):
         log(f"Folder not found: {folder}")
         return changes
+    touched_dirs = set()
     for root, _, files in os.walk(folder):
         for fn in files:
             if not fn.lower().endswith(VIDEO_EXTENSIONS):
@@ -2133,12 +2183,16 @@ def retitle_extended_files(folder, apply=False):
             parsed = parse_extended_name(fn)
             if not parsed:
                 continue
-            prefix, old_title, tail, ext = parsed
+            prefix, old_title, show, genre, res, ch, codec, ext = parsed
             readable = clean_episode_title(old_title)
-            safe = sanitize_filename(readable)
-            if not safe or safe == old_title:
+            safe_title = sanitize_filename(readable)
+            safe_show = sanitize_filename(show)
+            safe_genre = sanitize_filename(genre)
+            if not safe_title:
                 continue
-            new_base = f"{prefix} - {safe} - {tail}"
+            new_base = f"{prefix} - {safe_title} - {safe_show} - {safe_genre} - {res} - {ch} - {codec} - None"
+            if new_base == os.path.splitext(fn)[0]:
+                continue  # nothing to change
             changes.append((fn, new_base + ext))
             if not apply:
                 continue
@@ -2155,12 +2209,19 @@ def retitle_extended_files(folder, apply=False):
                 # Update the NFO first (while still at its old name), then rename
                 # both, so a crash never leaves a renamed video with a stale NFO.
                 if os.path.exists(old_nfo):
-                    _rewrite_nfo_title(old_nfo, readable, new_base + ext)
+                    _rewrite_nfo_fields(old_nfo, readable, safe_show, new_base + ext)
                     os.rename(old_nfo, new_nfo)
                 os.rename(old_video, new_video)
-                log(f"  Retitled: {old_title}  ->  {safe}")
+                touched_dirs.add(root)
+                log(f"  Retitled: {fn}  ->  {new_base + ext}")
             except OSError as e:
                 log(f"  Error retitling {fn}: {e}")
+    # Clean the show-level tvshow.nfo in any folder we changed.
+    if apply:
+        for d in touched_dirs:
+            tvnfo = os.path.join(d, "tvshow.nfo")
+            if os.path.isfile(tvnfo):
+                _clean_tvshow_nfo(tvnfo)
                 changes.pop()
     return changes
 
