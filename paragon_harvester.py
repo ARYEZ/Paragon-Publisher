@@ -2074,6 +2074,96 @@ def list_saved_shows():
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
 
+def parse_extended_name(basename):
+    """Split an extended-format basename into its parts, or return None.
+
+    Format: 'SSxEE - <episode title> - <show> - <genre> - <res> - <ch> - <codec> - None.ext'
+    The title itself may contain ' - ', so the six fixed trailing fields are
+    peeled off from the right. Returns (prefix, episode_title, tail, ext).
+    """
+    stem, ext = os.path.splitext(basename)
+    if ' - ' not in stem:
+        return None
+    prefix, rest = stem.split(' - ', 1)
+    if not re.match(r'^\d+x\d+$', prefix):
+        return None
+    segs = rest.rsplit(' - ', 6)
+    if len(segs) != 7 or segs[-1] != 'None':
+        return None
+    return prefix, segs[0], ' - '.join(segs[1:]), ext
+
+def _rewrite_nfo_title(nfo_path, new_title, new_file_basename):
+    """Update the <title> (and <file>) of an existing episode NFO in place,
+    preserving the rest of the file byte-for-byte."""
+    try:
+        with open(nfo_path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return
+    esc_title = xml_escape(strip_4byte_chars(new_title))
+    data = re.sub(r'(<title>).*?(</title>)',
+                  lambda m: m.group(1) + esc_title + m.group(2),
+                  data, count=1, flags=re.DOTALL)
+    data = re.sub(r'(<file>).*?(</file>)',
+                  lambda m: m.group(1) + xml_escape(new_file_basename) + m.group(2),
+                  data, count=1, flags=re.DOTALL)
+    try:
+        with open(nfo_path, "w", encoding="utf-8") as f:
+            f.write(data)
+    except OSError:
+        pass
+
+def retitle_extended_files(folder, apply=False):
+    """Re-clean the episode-title field of already-processed extended-format
+    files under `folder`, without unprocessing them.
+
+    For each video whose title field changes under the current cleanup rules,
+    renames the video and its sidecar .nfo and rewrites the NFO's <title>/<file>.
+    With apply=False it only reports what would change. Returns a list of
+    (old_basename, new_basename) tuples.
+    """
+    changes = []
+    if not os.path.isdir(folder):
+        log(f"Folder not found: {folder}")
+        return changes
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if not fn.lower().endswith(VIDEO_EXTENSIONS):
+                continue
+            parsed = parse_extended_name(fn)
+            if not parsed:
+                continue
+            prefix, old_title, tail, ext = parsed
+            readable = clean_episode_title(old_title)
+            safe = sanitize_filename(readable)
+            if not safe or safe == old_title:
+                continue
+            new_base = f"{prefix} - {safe} - {tail}"
+            changes.append((fn, new_base + ext))
+            if not apply:
+                continue
+            old_stem = os.path.splitext(fn)[0]
+            old_video = os.path.join(root, fn)
+            new_video = os.path.join(root, new_base + ext)
+            old_nfo = os.path.join(root, old_stem + ".nfo")
+            new_nfo = os.path.join(root, new_base + ".nfo")
+            if os.path.exists(new_video) and os.path.normcase(new_video) != os.path.normcase(old_video):
+                log(f"  Skip (target exists): {new_base + ext}")
+                changes.pop()
+                continue
+            try:
+                # Update the NFO first (while still at its old name), then rename
+                # both, so a crash never leaves a renamed video with a stale NFO.
+                if os.path.exists(old_nfo):
+                    _rewrite_nfo_title(old_nfo, readable, new_base + ext)
+                    os.rename(old_nfo, new_nfo)
+                os.rename(old_video, new_video)
+                log(f"  Retitled: {old_title}  ->  {safe}")
+            except OSError as e:
+                log(f"  Error retitling {fn}: {e}")
+                changes.pop()
+    return changes
+
 def reset_show_counter(show_name):
     """Non-interactive episode-counter reset for the GUI.
 

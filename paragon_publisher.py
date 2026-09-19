@@ -18288,6 +18288,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                      fg_color=ParagonTheme.BG_TERTIARY,
                                                      hover_color=ParagonTheme.BG_HOVER)
         self.reset_show_btn.pack(side="left", padx=(10, 0))
+        self.fix_titles_btn = ParagonSecondaryButton(actions, text="🧹 FIX TITLES",
+                                                     command=self._fix_titles, width=140, height=40,
+                                                     fg_color=ParagonTheme.BG_TERTIARY,
+                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.fix_titles_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -18530,6 +18535,8 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.download_org_btn.configure(state=state)
         if hasattr(self, "reset_show_btn"):
             self.reset_show_btn.configure(state=state)
+        if hasattr(self, "fix_titles_btn"):
+            self.fix_titles_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -18804,6 +18811,76 @@ class HarvesterDialog(ctk.CTkToplevel):
                                command=_close).pack(side="right")
         ParagonButton(btns, text="↺ RESET", width=130,
                       command=_do).pack(side="right", padx=(0, 10))
+
+    def _fix_titles(self):
+        """Re-clean the episode-title field of already-processed files in place
+        (rename video + .nfo and rewrite the NFO title), no unprocessing needed.
+        Previews the changes and asks before applying."""
+        if self._worker and self._worker.is_alive():
+            return
+        start = self.dest_entry.get().strip() or str(Path.home())
+        folder = filedialog.askdirectory(
+            title="Select folder to re-clean titles (recurses into show folders)",
+            initialdir=start, parent=self)
+        if not folder:
+            return
+        # Preview (no changes) on a worker so a big tree doesn't freeze the UI.
+        self._busy(True, monitoring=False)
+        self._set_status("Scanning titles...")
+
+        def work():
+            errored = False
+            try:
+                changes = paragon_harvester.retitle_extended_files(folder, apply=False)
+                self.after(0, lambda: self._fix_titles_confirm(folder, changes))
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR scanning titles: {e}")
+            finally:
+                self._set_status("Idle")
+                if errored and self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_titles_confirm(self, folder, changes):
+        self._busy(False)
+        if not changes:
+            messagebox.showinfo(
+                "Fix Titles",
+                "No episode titles need changing under:\n\n" + folder,
+                parent=self)
+            return
+        sample = "\n".join(f"  {old}\n     → {new}" for old, new in changes[:8])
+        more = f"\n\n…and {len(changes) - 8} more." if len(changes) > 8 else ""
+        if not messagebox.askyesno(
+                "Fix Titles",
+                f"{len(changes)} file(s) will be renamed and their NFO titles updated.\n\n"
+                f"{sample}{more}\n\nProceed?",
+                parent=self):
+            return
+        self._busy(True, monitoring=False)
+        self._set_status("Fixing titles...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            done = []
+            errored = False
+            try:
+                done = paragon_harvester.retitle_extended_files(folder, apply=True)
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR fixing titles: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+                if not errored:
+                    self._notify_complete("Fix Titles Complete",
+                                          f"Retitled {len(done)} file(s).")
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
 
     def _pull_subscriptions(self):
         if not self._subscriptions:
