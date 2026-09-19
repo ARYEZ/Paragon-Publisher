@@ -10240,10 +10240,16 @@ class FileLibraryDialog(ctk.CTkToplevel):
 class MovieLibraryDialog(ctk.CTkToplevel):
     """MediaElch-style Movie Library browser for managing multiple movies"""
     
-    def __init__(self, parent, library_path: str):
+    def __init__(self, parent, library_path):
         super().__init__(parent)
-        
-        self.library_path = library_path
+
+        # Accept a single folder (str) or several (list); everything works off
+        # self.library_paths, with self.library_path as the first for display.
+        if isinstance(library_path, (list, tuple)):
+            self.library_paths = [p for p in library_path if p]
+        else:
+            self.library_paths = [library_path] if library_path else []
+        self.library_path = self.library_paths[0] if self.library_paths else ""
         self.movies = []  # List of {name, path, year, has_nfo, poster_path, etc}
         self.selected_movie = None
         self.movie_widgets = {}
@@ -10271,11 +10277,13 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
         header_inner.pack(fill="both", expand=True, padx=20, pady=15)
         
-        ctk.CTkLabel(header_inner, text="🎬 MOVIE LIBRARY", 
+        ctk.CTkLabel(header_inner, text="🎬 MOVIE LIBRARY",
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        
-        self.library_path_label = ctk.CTkLabel(header_inner, text=self.library_path,
+
+        _hdr = self.library_path if len(self.library_paths) <= 1 else \
+            f"{self.library_path}  (+{len(self.library_paths) - 1} more)"
+        self.library_path_label = ctk.CTkLabel(header_inner, text=_hdr,
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=16))
         self.library_path_label.pack(side="left", padx=(20, 0))
@@ -10357,44 +10365,49 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
     
     def _load_library(self):
-        """Load library from cache or scan if needed"""
-        cached = LibraryCache.load_cache('movie', self.library_path)
-        if cached:
+        """Load from cache only if every folder has one; else rescan all."""
+        combined = []
+        all_cached = bool(self.library_paths)
+        for path in self.library_paths:
+            cached = LibraryCache.load_cache('movie', path)
+            if cached is None:
+                all_cached = False
+                break
+            combined.extend(cached)
+        if all_cached:
             self.status_label.configure(text="Loading from cache...")
             self.update_idletasks()
-            self._populate_movie_list(cached)
-            self.status_label.configure(text=f"Loaded {len(cached)} movies (cached)")
+            self._populate_movie_list(combined)
+            self.status_label.configure(text=f"Loaded {len(combined)} movies (cached)")
         else:
             self._scan_library(force=True)
-    
+
     def _scan_library(self, force=False):
-        """Scan the library folder for movies"""
+        """Scan every library folder for movies and merge the results."""
         self.movies = []
         self.status_label.configure(text="Scanning...")
         self.update_idletasks()
-        
+
         def scan():
-            movies = []
-            try:
-                for item in os.listdir(self.library_path):
-                    item_path = os.path.join(self.library_path, item)
-                    if os.path.isdir(item_path):
-                        # Check if it looks like a movie folder
-                        movie_info = self._analyze_movie_folder(item_path)
-                        if movie_info:
-                            movies.append(movie_info)
-            except Exception as e:
-                print(f"Error scanning library: {e}")
-            
-            # Sort by name
-            movies.sort(key=lambda x: x['name'].lower())
-            
-            # Save to cache
-            LibraryCache.save_cache('movie', self.library_path, movies)
-            
+            combined = []
+            for path in self.library_paths:
+                movies = []
+                try:
+                    for item in os.listdir(path):
+                        item_path = os.path.join(path, item)
+                        if os.path.isdir(item_path):
+                            movie_info = self._analyze_movie_folder(item_path)
+                            if movie_info:
+                                movies.append(movie_info)
+                except Exception as e:
+                    print(f"Error scanning {path}: {e}")
+                movies.sort(key=lambda x: x['name'].lower())
+                LibraryCache.save_cache('movie', path, movies)
+                combined.extend(movies)
+
             # Only update if dialog still exists
-            self.after(0, lambda: self._populate_movie_list(movies) if self.winfo_exists() else None)
-        
+            self.after(0, lambda: self._populate_movie_list(combined) if self.winfo_exists() else None)
+
         threading.Thread(target=scan, daemon=True).start()
     
     def _analyze_movie_folder(self, folder_path: str) -> Optional[Dict]:
@@ -10797,8 +10810,8 @@ class MovieLibraryDialog(ctk.CTkToplevel):
             btn.configure(text=btn_text)
         
         # Update cache
-        LibraryCache.save_cache('movie', self.library_path, self.movies)
-        
+        self._save_caches()
+
         # Refresh the details panel
         self._select_movie(new_info)
         self.status_label.configure(text=f"Rescanned {new_info['name']}")
@@ -10815,10 +10828,30 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                 else:
                     widget.pack_forget()
     
+    def _save_caches(self):
+        """Persist self.movies to per-folder caches (each folder keeps only its
+        own movies, matched by path prefix)."""
+        def under(child, parent):
+            try:
+                c = os.path.normcase(os.path.normpath(child))
+                p = os.path.normcase(os.path.normpath(parent))
+                if c == p:
+                    return True
+                if not p.endswith(os.sep):
+                    p += os.sep
+                return c.startswith(p)
+            except Exception:
+                return False
+        for path in self.library_paths:
+            subset = [m for m in self.movies if under(m.get('path', ''), path)]
+            LibraryCache.save_cache('movie', path, subset)
+
     def _change_folder(self):
-        """Change the library folder"""
+        """View a different single folder for this session (the persistent
+        multi-folder list is managed from Settings > Movie Library Folders)."""
         folder = filedialog.askdirectory(title="Select Movie Library Folder", initialdir=self.library_path)
         if folder:
+            self.library_paths = [folder]
             self.library_path = folder
             self.library_path_label.configure(text=folder)
             self._scan_library()
@@ -10827,10 +10860,16 @@ class MovieLibraryDialog(ctk.CTkToplevel):
 class MusicLibraryDialog(ctk.CTkToplevel):
     """Music Library browser for managing music collection by artist/album"""
     
-    def __init__(self, parent, library_path: str):
+    def __init__(self, parent, library_path):
         super().__init__(parent)
-        
-        self.library_path = library_path
+
+        # Accept a single folder (str) or several (list); everything works off
+        # self.library_paths, with self.library_path as the first for display.
+        if isinstance(library_path, (list, tuple)):
+            self.library_paths = [p for p in library_path if p]
+        else:
+            self.library_paths = [library_path] if library_path else []
+        self.library_path = self.library_paths[0] if self.library_paths else ""
         self.artists = []  # List of {name, path, album_count, track_count}
         self.albums = []   # Albums for selected artist
         self.selected_artist = None
@@ -10861,11 +10900,13 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
         header_inner.pack(fill="both", expand=True, padx=20, pady=15)
         
-        ctk.CTkLabel(header_inner, text="🎵 MUSIC LIBRARY", 
+        ctk.CTkLabel(header_inner, text="🎵 MUSIC LIBRARY",
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        
-        self.library_path_label = ctk.CTkLabel(header_inner, text=self.library_path,
+
+        _hdr = self.library_path if len(self.library_paths) <= 1 else \
+            f"{self.library_path}  (+{len(self.library_paths) - 1} more)"
+        self.library_path_label = ctk.CTkLabel(header_inner, text=_hdr,
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=16))
         self.library_path_label.pack(side="left", padx=(20, 0))
@@ -10971,46 +11012,50 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
     
     def _load_library(self):
-        """Load library from cache or scan if needed"""
-        cached = LibraryCache.load_cache('music', self.library_path)
-        if cached:
+        """Load from cache only if every folder has one; else rescan all."""
+        combined = []
+        all_cached = bool(self.library_paths)
+        for path in self.library_paths:
+            cached = LibraryCache.load_cache('music', path)
+            if cached is None:
+                all_cached = False
+                break
+            combined.extend(cached)
+        if all_cached:
             self.status_label.configure(text="Loading from cache...")
             self.update_idletasks()
-            self._populate_artist_list(cached)
-            self.status_label.configure(text=f"Loaded {len(cached)} artists (cached)")
+            self._populate_artist_list(combined)
+            self.status_label.configure(text=f"Loaded {len(combined)} artists (cached)")
         else:
             self._scan_library(force=True)
-    
+
     def _scan_library(self, force=False):
-        """Scan the library folder for artists"""
+        """Scan every library folder for artists and merge the results."""
         self.artists = []
         self.status_label.configure(text="Scanning...")
         self.update_idletasks()
-        
+
         def scan():
-            artists = []
             audio_extensions = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
-            
-            try:
-                for item in os.listdir(self.library_path):
-                    item_path = os.path.join(self.library_path, item)
-                    if os.path.isdir(item_path):
-                        # Check if it's an artist folder (contains albums or audio files)
-                        artist_info = self._analyze_artist_folder(item_path, audio_extensions)
-                        if artist_info:
-                            artists.append(artist_info)
-            except Exception as e:
-                print(f"Error scanning library: {e}")
-            
-            # Sort by name
-            artists.sort(key=lambda x: x['name'].lower())
-            
-            # Save to cache
-            LibraryCache.save_cache('music', self.library_path, artists)
-            
+            combined = []
+            for path in self.library_paths:
+                artists = []
+                try:
+                    for item in os.listdir(path):
+                        item_path = os.path.join(path, item)
+                        if os.path.isdir(item_path):
+                            artist_info = self._analyze_artist_folder(item_path, audio_extensions)
+                            if artist_info:
+                                artists.append(artist_info)
+                except Exception as e:
+                    print(f"Error scanning {path}: {e}")
+                artists.sort(key=lambda x: x['name'].lower())
+                LibraryCache.save_cache('music', path, artists)
+                combined.extend(artists)
+
             # Only update if dialog still exists
-            self.after(0, lambda: self._populate_artist_list(artists) if self.winfo_exists() else None)
-        
+            self.after(0, lambda: self._populate_artist_list(combined) if self.winfo_exists() else None)
+
         threading.Thread(target=scan, daemon=True).start()
     
     def _analyze_artist_folder(self, folder_path: str, audio_extensions: set) -> Optional[Dict]:
@@ -11458,9 +11503,11 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     widget.pack_forget()
     
     def _change_folder(self):
-        """Change the library folder"""
+        """View a different single folder for this session (the persistent
+        multi-folder list is managed from Settings > Music Library Folders)."""
         folder = filedialog.askdirectory(title="Select Music Library Folder", initialdir=self.library_path)
         if folder:
+            self.library_paths = [folder]
             self.library_path = folder
             self.library_path_label.configure(text=folder)
             self._scan_library()
@@ -15097,12 +15144,12 @@ MusicBrainz Album Lookup:
         )
         self.movie_library_label.pack(side="left", padx=(10, 5))
         
-        # Load saved Movie library path
+        # Load saved Movie library path(s)
         self._load_movie_library_path()
-        
+
         ParagonSecondaryButton(
-            movie_library_inner, text="CHANGE", width=80,
-            command=self._change_movie_library_path
+            movie_library_inner, text="FOLDERS", width=90,
+            command=self._manage_movie_folders
         ).pack(side="left")
         
         # Music Library folder row
@@ -15119,12 +15166,12 @@ MusicBrainz Album Lookup:
         )
         self.music_library_label.pack(side="left", padx=(10, 5))
         
-        # Load saved Music library path
+        # Load saved Music library path(s)
         self._load_music_library_path()
-        
+
         ParagonSecondaryButton(
-            music_library_inner, text="CHANGE", width=80,
-            command=self._change_music_library_path
+            music_library_inner, text="FOLDERS", width=90,
+            command=self._manage_music_folders
         ).pack(side="left")
         
         # Main buttons - Library browsers
@@ -15309,19 +15356,22 @@ MusicBrainz Album Lookup:
             print(f"Could not save TV library paths: {e}")
         self.tv_library_path = self.tv_library_paths[0] if self.tv_library_paths else ""
 
-    def _manage_tv_folders(self):
-        """Add or remove the folders that make up the TV library."""
+    def _manage_library_folders(self, title, blurb, get_paths, set_paths, save,
+                                update_label, pick_title):
+        """Generic add/remove-folders manager shared by the TV, Movie and Music
+        library settings. get_paths/set_paths read and write the owning list;
+        save persists it; update_label refreshes the settings-row label."""
         win = ctk.CTkToplevel(self)
-        win.title("TV Library Folders")
+        win.title(title)
         win.configure(fg_color=ParagonTheme.BG_DARK)
         win.transient(self)
         win.geometry("640x430")
         win.after(10, win.grab_set)
 
-        ParagonLabel(win, text="TV Library Folders", style="subheader").pack(
+        ParagonLabel(win, text=title, style="subheader").pack(
             anchor="w", padx=20, pady=(18, 2))
-        ParagonLabel(win, text="Shows from every folder listed here appear together in the TV Library.",
-                     style="muted").pack(anchor="w", padx=20, pady=(0, 10))
+        ParagonLabel(win, text=blurb, style="muted").pack(
+            anchor="w", padx=20, pady=(0, 10))
 
         list_frame = ctk.CTkScrollableFrame(win, fg_color=ParagonTheme.BG_SECONDARY)
         list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
@@ -15329,30 +15379,30 @@ MusicBrainz Album Lookup:
         def refresh():
             for w in list_frame.winfo_children():
                 w.destroy()
-            if not self.tv_library_paths:
+            if not get_paths():
                 ParagonLabel(list_frame, text="No folders yet — click ADD FOLDER.",
                              style="muted").pack(anchor="w", padx=10, pady=12)
                 return
-            for p in list(self.tv_library_paths):
+            for p in list(get_paths()):
                 row = ctk.CTkFrame(list_frame, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6)
                 row.pack(fill="x", padx=6, pady=4)
                 ctk.CTkLabel(row, text=p, text_color=ParagonTheme.TEXT_PRIMARY,
                              font=ctk.CTkFont(size=14), anchor="w").pack(
                     side="left", fill="x", expand=True, padx=10, pady=8)
                 def _remove(path=p):
-                    self.tv_library_paths = [x for x in self.tv_library_paths if x != path]
-                    self._save_tv_library_paths()
-                    self._update_tv_library_label()
+                    set_paths([x for x in get_paths() if x != path])
+                    save()
+                    update_label()
                     refresh()
                 ParagonSecondaryButton(row, text="✕", width=40,
                                        command=_remove).pack(side="right", padx=8, pady=6)
 
         def add():
-            folder = filedialog.askdirectory(title="Select a TV Library Folder", parent=win)
-            if folder and folder not in self.tv_library_paths:
-                self.tv_library_paths.append(folder)
-                self._save_tv_library_paths()
-                self._update_tv_library_label()
+            folder = filedialog.askdirectory(title=pick_title, parent=win)
+            if folder and folder not in get_paths():
+                set_paths(get_paths() + [folder])
+                save()
+                update_label()
                 refresh()
 
         refresh()
@@ -15368,54 +15418,75 @@ MusicBrainz Album Lookup:
                 pass
             win.destroy()
         ParagonSecondaryButton(btns, text="DONE", width=110, command=_close).pack(side="right")
-    
+
+    def _manage_tv_folders(self):
+        """Add or remove the folders that make up the TV library."""
+        self._manage_library_folders(
+            title="TV Library Folders",
+            blurb="Shows from every folder listed here appear together in the TV Library.",
+            get_paths=lambda: self.tv_library_paths,
+            set_paths=lambda v: setattr(self, 'tv_library_paths', v),
+            save=self._save_tv_library_paths,
+            update_label=self._update_tv_library_label,
+            pick_title="Select a TV Library Folder")
+
     def _load_movie_library_path(self):
-        """Load saved Movie library path"""
+        """Load saved Movie library folder(s), migrating the legacy single key."""
+        self.movie_library_paths = []
         config_path = Path.home() / ".pyrenamer_config.json"
         try:
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    library_path = config.get('movie_library_path', '')
-                    if library_path and os.path.isdir(library_path):
-                        self.movie_library_path = library_path
-                        # Truncate display if too long
-                        display_path = library_path
-                        if len(display_path) > 35:
-                            display_path = "..." + display_path[-32:]
-                        self.movie_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-                    else:
-                        self.movie_library_path = ""
+                paths = config.get('movie_library_paths')
+                if not paths:
+                    legacy = config.get('movie_library_path', '')
+                    paths = [legacy] if legacy else []
+                self.movie_library_paths = [p for p in paths if p and os.path.isdir(p)]
         except Exception as e:
-            print(f"Could not load Movie library path: {e}")
-            self.movie_library_path = ""
-    
-    def _change_movie_library_path(self):
-        """Change the Movie library folder"""
-        initial_dir = getattr(self, 'movie_library_path', '') or str(Path.home())
-        folder = filedialog.askdirectory(title="Select Movie Library Folder", initialdir=initial_dir)
-        if folder:
-            self.movie_library_path = folder
-            # Truncate display if too long
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            self.movie_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
-            try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                
-                config['movie_library_path'] = folder
-                
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except Exception as e:
-                print(f"Could not save Movie library path: {e}")
+            print(f"Could not load Movie library path(s): {e}")
+            self.movie_library_paths = []
+        self.movie_library_path = self.movie_library_paths[0] if self.movie_library_paths else ""
+        self._update_movie_library_label()
+
+    def _update_movie_library_label(self):
+        if not hasattr(self, 'movie_library_label'):
+            return
+        paths = getattr(self, 'movie_library_paths', [])
+        if not paths:
+            self.movie_library_label.configure(text="Not set", text_color=ParagonTheme.TEXT_MUTED)
+            return
+        display = paths[0]
+        if len(display) > 28:
+            display = "..." + display[-25:]
+        if len(paths) > 1:
+            display += f"  (+{len(paths) - 1} more)"
+        self.movie_library_label.configure(text=display, text_color=ParagonTheme.TEXT_PRIMARY)
+
+    def _save_movie_library_paths(self):
+        config_path = Path.home() / ".pyrenamer_config.json"
+        try:
+            config = {}
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            config['movie_library_paths'] = self.movie_library_paths
+            config['movie_library_path'] = self.movie_library_paths[0] if self.movie_library_paths else ''
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+        except Exception as e:
+            print(f"Could not save Movie library paths: {e}")
+        self.movie_library_path = self.movie_library_paths[0] if self.movie_library_paths else ""
+
+    def _manage_movie_folders(self):
+        self._manage_library_folders(
+            title="Movie Library Folders",
+            blurb="Movies from every folder listed here appear together in the Movie Library.",
+            get_paths=lambda: self.movie_library_paths,
+            set_paths=lambda v: setattr(self, 'movie_library_paths', v),
+            save=self._save_movie_library_paths,
+            update_label=self._update_movie_library_label,
+            pick_title="Select a Movie Library Folder")
     
     def _open_movie_library(self):
         """Open Movie Library browser to manage multiple movies"""
@@ -15431,119 +15502,92 @@ MusicBrainz Album Lookup:
         if fanart_key:
             FanartTVAPI.set_api_key(fanart_key)
         
-        # Use saved path if available, otherwise prompt
-        folder = getattr(self, 'movie_library_path', '') if hasattr(self, 'movie_library_path') else ''
-        
-        if not folder or not os.path.isdir(folder):
-            # Ask user to select a folder containing movies
+        # Use saved folder(s) if available, otherwise prompt for the first one.
+        folders = [p for p in getattr(self, 'movie_library_paths', []) if os.path.isdir(p)]
+
+        if not folders:
             folder = filedialog.askdirectory(title="Select Movie Library Folder (contains movie folders)")
             if not folder:
                 return
-            
-            # Save the selected folder
-            self.movie_library_path = folder
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            if hasattr(self, 'movie_library_label'):
-                self.movie_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
-            try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                config['movie_library_path'] = folder
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except:
-                pass
-        
-        dialog = MovieLibraryDialog(self, folder)
+            self.movie_library_paths = [folder]
+            self._save_movie_library_paths()
+            self._update_movie_library_label()
+            folders = [folder]
+
+        dialog = MovieLibraryDialog(self, folders)
     
     def _load_music_library_path(self):
-        """Load saved Music library path"""
+        """Load saved Music library folder(s), migrating the legacy single key."""
+        self.music_library_paths = []
         config_path = Path.home() / ".pyrenamer_config.json"
         try:
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    library_path = config.get('music_library_path', '')
-                    if library_path and os.path.isdir(library_path):
-                        self.music_library_path = library_path
-                        # Truncate display if too long
-                        display_path = library_path
-                        if len(display_path) > 35:
-                            display_path = "..." + display_path[-32:]
-                        self.music_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-                    else:
-                        self.music_library_path = ""
+                paths = config.get('music_library_paths')
+                if not paths:
+                    legacy = config.get('music_library_path', '')
+                    paths = [legacy] if legacy else []
+                self.music_library_paths = [p for p in paths if p and os.path.isdir(p)]
         except Exception as e:
-            print(f"Could not load Music library path: {e}")
-            self.music_library_path = ""
-    
-    def _change_music_library_path(self):
-        """Change the Music library folder"""
-        initial_dir = getattr(self, 'music_library_path', '') or str(Path.home())
-        folder = filedialog.askdirectory(title="Select Music Library Folder", initialdir=initial_dir)
-        if folder:
-            self.music_library_path = folder
-            # Truncate display if too long
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            self.music_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
-            try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                
-                config['music_library_path'] = folder
-                
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except Exception as e:
-                print(f"Could not save Music library path: {e}")
-    
+            print(f"Could not load Music library path(s): {e}")
+            self.music_library_paths = []
+        self.music_library_path = self.music_library_paths[0] if self.music_library_paths else ""
+        self._update_music_library_label()
+
+    def _update_music_library_label(self):
+        if not hasattr(self, 'music_library_label'):
+            return
+        paths = getattr(self, 'music_library_paths', [])
+        if not paths:
+            self.music_library_label.configure(text="Not set", text_color=ParagonTheme.TEXT_MUTED)
+            return
+        display = paths[0]
+        if len(display) > 28:
+            display = "..." + display[-25:]
+        if len(paths) > 1:
+            display += f"  (+{len(paths) - 1} more)"
+        self.music_library_label.configure(text=display, text_color=ParagonTheme.TEXT_PRIMARY)
+
+    def _save_music_library_paths(self):
+        config_path = Path.home() / ".pyrenamer_config.json"
+        try:
+            config = {}
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            config['music_library_paths'] = self.music_library_paths
+            config['music_library_path'] = self.music_library_paths[0] if self.music_library_paths else ''
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+        except Exception as e:
+            print(f"Could not save Music library paths: {e}")
+        self.music_library_path = self.music_library_paths[0] if self.music_library_paths else ""
+
+    def _manage_music_folders(self):
+        self._manage_library_folders(
+            title="Music Library Folders",
+            blurb="Artists from every folder listed here appear together in the Music Library.",
+            get_paths=lambda: self.music_library_paths,
+            set_paths=lambda v: setattr(self, 'music_library_paths', v),
+            save=self._save_music_library_paths,
+            update_label=self._update_music_library_label,
+            pick_title="Select a Music Library Folder")
+
     def _open_music_library(self):
         """Open Music Library browser to manage music collection"""
-        # Use saved path if available, otherwise prompt
-        folder = getattr(self, 'music_library_path', '') if hasattr(self, 'music_library_path') else ''
-        
-        if not folder or not os.path.isdir(folder):
-            # Ask user to select a folder containing music
+        folders = [p for p in getattr(self, 'music_library_paths', []) if os.path.isdir(p)]
+
+        if not folders:
             folder = filedialog.askdirectory(title="Select Music Library Folder (contains artist/album folders)")
             if not folder:
                 return
-            
-            # Save the selected folder
-            self.music_library_path = folder
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            if hasattr(self, 'music_library_label'):
-                self.music_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
-            try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                config['music_library_path'] = folder
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except:
-                pass
-        
-        dialog = MusicLibraryDialog(self, folder)
+            self.music_library_paths = [folder]
+            self._save_music_library_paths()
+            self._update_music_library_label()
+            folders = [folder]
+
+        dialog = MusicLibraryDialog(self, folders)
     
     def _open_file_library(self):
         """Open File Library browser for general file management and renaming"""
