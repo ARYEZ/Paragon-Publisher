@@ -18128,6 +18128,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                command=self._request_stop, width=110, height=40)
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
+        self.reset_show_btn = ParagonSecondaryButton(actions, text="↺ RESET SHOW",
+                                                     command=self._reset_show, width=150, height=40,
+                                                     fg_color=ParagonTheme.BG_TERTIARY,
+                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.reset_show_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -18339,6 +18344,8 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.process_btn.configure(state=state)
         self.download_btn.configure(state=state)
         self.download_org_btn.configure(state=state)
+        if hasattr(self, "reset_show_btn"):
+            self.reset_show_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -18530,6 +18537,74 @@ class HarvesterDialog(ctk.CTkToplevel):
                 archive, url, cookies_file=cookies_file,
                 cookies_from_browser=cookies_from_browser, log_cb=self._log)
         threading.Thread(target=work, daemon=True).start()
+
+    def _reset_show(self):
+        """Reset a show's episode counter so its next file starts at 01x01.
+
+        Lets the user pick from the shows saved in summaries.json; genre,
+        summary and matched channel are preserved.
+        """
+        shows = paragon_harvester.list_saved_shows()
+        if not shows:
+            messagebox.showinfo(
+                "No Saved Shows",
+                "No shows have been processed yet, so there's nothing to reset.",
+                parent=self)
+            return
+
+        keys = sorted(shows.keys())
+
+        def _label(k):
+            e = shows[k]
+            try:
+                se = "%02dx%02d" % (int(e.get("season", 1) or 1),
+                                    int(e.get("episode", 1) or 1))
+            except (TypeError, ValueError):
+                se = "??x??"
+            return f"{k}   (currently {se})"
+
+        labels = [_label(k) for k in keys]
+
+        win = ctk.CTkToplevel(self)
+        win.title("Reset Show")
+        win.configure(fg_color=ParagonTheme.BG_DARK)
+        win.transient(self)
+        win.geometry("560x250")
+        win.after(10, win.grab_set)
+
+        ParagonLabel(win, text="Reset a show's episode counter",
+                     style="subheader").pack(anchor="w", padx=20, pady=(20, 4))
+        ParagonLabel(win,
+                     text="The next file processed for the chosen show will start at 01x01.\n"
+                          "Its genre, summary and matched channel are kept.",
+                     style="muted").pack(anchor="w", padx=20, pady=(0, 14))
+
+        sel = ctk.StringVar(value=labels[0])
+        ParagonOptionMenu(win, values=labels, variable=sel,
+                          width=500).pack(padx=20, pady=(0, 18))
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(0, 18))
+
+        def _close():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+
+        def _do():
+            show_key = keys[labels.index(sel.get())] if sel.get() in labels else keys[0]
+            _close()
+            ok, msg = paragon_harvester.reset_show_counter(show_key)
+            self._append_log(("✓ " if ok else "✗ ") + msg)
+            (messagebox.showinfo if ok else messagebox.showwarning)(
+                "Reset Show", msg, parent=self)
+
+        ParagonSecondaryButton(btns, text="CANCEL", width=110,
+                               command=_close).pack(side="right")
+        ParagonButton(btns, text="↺ RESET", width=130,
+                      command=_do).pack(side="right", padx=(0, 10))
 
     def _pull_subscriptions(self):
         if not self._subscriptions:

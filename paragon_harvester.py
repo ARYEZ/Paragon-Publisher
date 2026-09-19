@@ -1846,6 +1846,55 @@ def reset_show(show_name_input):
     else:
         log("(Destination folder doesn't exist yet; tvshow.nfo will be created on the next run.)")
 
+def list_saved_shows():
+    """Return {show_key: entry} from summaries.json, or {} if none/unreadable.
+
+    Non-interactive helper for the GUI so it can present the list of shows the
+    user can reset.
+    """
+    try:
+        with open(SUMMARY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+def reset_show_counter(show_name):
+    """Non-interactive episode-counter reset for the GUI.
+
+    Sets season=1, episode=0 for the named show so the next file processed
+    becomes 01x01, preserving its genre, summary and matched channel. Returns
+    (ok: bool, message: str).
+    """
+    try:
+        with open(SUMMARY_FILE, "r", encoding="utf-8") as f:
+            show_data = json.load(f)
+    except FileNotFoundError:
+        return False, "No saved show data yet (summaries.json not found)."
+    except (json.JSONDecodeError, OSError) as e:
+        return False, f"Could not read {SUMMARY_FILE}: {e}"
+
+    show_key = (show_name or "").strip().title()
+    if show_key not in show_data:
+        return False, f"Show '{show_key}' not found in {SUMMARY_FILE}."
+
+    entry = show_data[show_key]
+    try:
+        old_label = "%02dx%02d" % (int(entry.get("season", 1) or 1),
+                                   int(entry.get("episode", 1) or 1))
+    except (TypeError, ValueError):
+        old_label = "??x??"
+    entry["season"] = 1
+    entry["episode"] = 0
+    show_data[show_key] = entry
+
+    try:
+        with open(SUMMARY_FILE, "w", encoding="utf-8") as f:
+            json.dump(show_data, f, indent=4)
+    except OSError as e:
+        return False, f"Could not write {SUMMARY_FILE}: {e}"
+    return True, f"'{show_key}' reset (was {old_label}). The next file processed will be 01x01."
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize video files into show folders.")
     parser.add_argument("-g", "--genre", help="Default genre for all shows.", default=None)
