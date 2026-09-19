@@ -9299,10 +9299,17 @@ def _set_library_sort(mode):
 class TVLibraryDialog(ctk.CTkToplevel):
     """MediaElch-style TV Library browser for managing multiple TV shows"""
     
-    def __init__(self, parent, library_path: str):
+    def __init__(self, parent, library_path):
         super().__init__(parent)
-        
-        self.library_path = library_path
+
+        # Accept a single folder (str) or several (list). Everything downstream
+        # works off self.library_paths; self.library_path stays as the first
+        # folder for the header display and dialog initialdir.
+        if isinstance(library_path, (list, tuple)):
+            self.library_paths = [p for p in library_path if p]
+        else:
+            self.library_paths = [library_path] if library_path else []
+        self.library_path = self.library_paths[0] if self.library_paths else ""
         self.shows = []
         self.selected_show = None
         self.show_widgets = {}
@@ -9333,7 +9340,11 @@ class TVLibraryDialog(ctk.CTkToplevel):
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
         
-        self.path_label = ctk.CTkLabel(header_inner, text=self.library_path,
+        if len(self.library_paths) > 1:
+            header_text = f"{self.library_path}  (+{len(self.library_paths) - 1} more)"
+        else:
+            header_text = self.library_path
+        self.path_label = ctk.CTkLabel(header_inner, text=header_text,
                                        text_color=ParagonTheme.TEXT_MUTED,
                                        font=ctk.CTkFont(size=16))
         self.path_label.pack(side="left", padx=(20, 0))
@@ -9412,11 +9423,20 @@ class TVLibraryDialog(ctk.CTkToplevel):
                      hover_color=ParagonTheme.BG_HOVER).pack(side="right")
     
     def _load_library(self):
-        cached = LibraryCache.load_cache('tv', self.library_path)
-        if cached:
-            self.shows = _sort_library_items(cached, self._sort_mode)
-            self.status_label.configure(text=f"Loaded {len(cached)} shows (cached)")
-            self.count_label.configure(text=f"{len(cached)} TV SHOWS")
+        # Load from cache only if EVERY folder has a cache; otherwise rescan all
+        # so a newly-added folder is picked up.
+        combined = []
+        all_cached = bool(self.library_paths)
+        for path in self.library_paths:
+            cached = LibraryCache.load_cache('tv', path)
+            if cached is None:
+                all_cached = False
+                break
+            combined.extend(cached)
+        if all_cached:
+            self.shows = _sort_library_items(combined, self._sort_mode)
+            self.status_label.configure(text=f"Loaded {len(combined)} shows (cached)")
+            self.count_label.configure(text=f"{len(combined)} TV SHOWS")
             for show in self.shows:
                 self._add_show_item(show)
         else:
@@ -9449,23 +9469,27 @@ class TVLibraryDialog(ctk.CTkToplevel):
         self.show_widgets = {}
         
         def scan():
-            shows = []
-            try:
-                for item in os.listdir(self.library_path):
-                    item_path = os.path.join(self.library_path, item)
-                    if os.path.isdir(item_path):
-                        show_info = self._analyze_folder(item_path)
-                        if show_info:
-                            shows.append(show_info)
-            except Exception as e:
-                print(f"Error scanning: {e}")
-            
-            shows.sort(key=lambda x: x['name'].lower())
-            LibraryCache.save_cache('tv', self.library_path, shows)
-            
+            combined = []
+            # Scan each library folder, caching each one separately so a per-
+            # folder reload stays valid, then merge into one show list.
+            for path in self.library_paths:
+                shows = []
+                try:
+                    for item in os.listdir(path):
+                        item_path = os.path.join(path, item)
+                        if os.path.isdir(item_path):
+                            show_info = self._analyze_folder(item_path)
+                            if show_info:
+                                shows.append(show_info)
+                except Exception as e:
+                    print(f"Error scanning {path}: {e}")
+                shows.sort(key=lambda x: x['name'].lower())
+                LibraryCache.save_cache('tv', path, shows)
+                combined.extend(shows)
+
             if self.winfo_exists():
-                self.after(0, lambda: self._on_scan_complete(shows))
-        
+                self.after(0, lambda: self._on_scan_complete(combined))
+
         threading.Thread(target=scan, daemon=True).start()
     
     def _analyze_folder(self, folder_path: str) -> Optional[Dict]:
@@ -9728,8 +9752,8 @@ class TVLibraryDialog(ctk.CTkToplevel):
             btn.configure(text=btn_text)
         
         # Update cache
-        LibraryCache.save_cache('tv', self.library_path, self.shows)
-        
+        self._save_caches()
+
         # Refresh the details panel
         self._on_show_click(new_info)
         self.status_label.configure(text=f"Rescanned {new_info['name']}")
@@ -9773,11 +9797,34 @@ class TVLibraryDialog(ctk.CTkToplevel):
                 else:
                     widget.pack_forget()
     
+    def _save_caches(self):
+        """Persist self.shows back to per-folder caches so each folder's cache
+        holds only its own shows (a show belongs to the library folder that is
+        a prefix of its path)."""
+        def under(child, parent):
+            try:
+                c = os.path.normcase(os.path.normpath(child))
+                p = os.path.normcase(os.path.normpath(parent))
+                if c == p:
+                    return True
+                # A drive root (e.g. "T:\") already ends in a separator; don't
+                # add a second one or the prefix check fails.
+                if not p.endswith(os.sep):
+                    p += os.sep
+                return c.startswith(p)
+            except Exception:
+                return False
+        for path in self.library_paths:
+            subset = [s for s in self.shows if under(s.get('path', ''), path)]
+            LibraryCache.save_cache('tv', path, subset)
+
     def _change_folder(self):
-        """Change library folder"""
-        folder = filedialog.askdirectory(title="Select TV Library Folder", 
+        """View a different single folder for this session (the persistent
+        multi-folder list is managed from Settings > TV Library Folders)."""
+        folder = filedialog.askdirectory(title="Select TV Library Folder",
                                         initialdir=self.library_path)
         if folder:
+            self.library_paths = [folder]
             self.library_path = folder
             path_display = folder if len(folder) < 40 else "..." + folder[-37:]
             self.path_label.configure(text=path_display)
@@ -15028,12 +15075,12 @@ MusicBrainz Album Lookup:
         )
         self.tv_library_label.pack(side="left", padx=(10, 5))
         
-        # Load saved TV library path
+        # Load saved TV library path(s)
         self._load_tv_library_path()
-        
+
         ParagonSecondaryButton(
-            library_inner, text="CHANGE", width=80,
-            command=self._change_tv_library_path
+            library_inner, text="FOLDERS", width=90,
+            command=self._manage_tv_folders
         ).pack(side="left")
         
         # Movie Library folder row
@@ -15206,52 +15253,121 @@ MusicBrainz Album Lookup:
             messagebox.showerror("Error", f"Could not save config: {e}")
     
     def _load_tv_library_path(self):
-        """Load saved TV library path"""
+        """Load saved TV library folder(s).
+
+        Supports a list ('tv_library_paths') and migrates the older single
+        'tv_library_path'. Only folders that still exist are kept.
+        """
+        self.tv_library_paths = []
         config_path = Path.home() / ".pyrenamer_config.json"
         try:
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    library_path = config.get('tv_library_path', '')
-                    if library_path and os.path.isdir(library_path):
-                        self.tv_library_path = library_path
-                        # Truncate display if too long
-                        display_path = library_path
-                        if len(display_path) > 35:
-                            display_path = "..." + display_path[-32:]
-                        self.tv_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-                    else:
-                        self.tv_library_path = ""
+                paths = config.get('tv_library_paths')
+                if not paths:
+                    legacy = config.get('tv_library_path', '')
+                    paths = [legacy] if legacy else []
+                self.tv_library_paths = [p for p in paths if p and os.path.isdir(p)]
         except Exception as e:
-            print(f"Could not load TV library path: {e}")
-            self.tv_library_path = ""
-    
-    def _change_tv_library_path(self):
-        """Change the TV library folder"""
-        initial_dir = getattr(self, 'tv_library_path', '') or str(Path.home())
-        folder = filedialog.askdirectory(title="Select TV Library Folder", initialdir=initial_dir)
-        if folder:
-            self.tv_library_path = folder
-            # Truncate display if too long
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            self.tv_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
+            print(f"Could not load TV library path(s): {e}")
+            self.tv_library_paths = []
+        # Back-compat single-path attribute (first folder)
+        self.tv_library_path = self.tv_library_paths[0] if self.tv_library_paths else ""
+        self._update_tv_library_label()
+
+    def _update_tv_library_label(self):
+        """Show the first folder (truncated) plus a '(+N more)' hint."""
+        if not hasattr(self, 'tv_library_label'):
+            return
+        paths = getattr(self, 'tv_library_paths', [])
+        if not paths:
+            self.tv_library_label.configure(text="Not set", text_color=ParagonTheme.TEXT_MUTED)
+            return
+        display = paths[0]
+        if len(display) > 28:
+            display = "..." + display[-25:]
+        if len(paths) > 1:
+            display += f"  (+{len(paths) - 1} more)"
+        self.tv_library_label.configure(text=display, text_color=ParagonTheme.TEXT_PRIMARY)
+
+    def _save_tv_library_paths(self):
+        """Persist the TV library folder list (and keep the legacy key in sync)."""
+        config_path = Path.home() / ".pyrenamer_config.json"
+        try:
+            config = {}
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            config['tv_library_paths'] = self.tv_library_paths
+            # Keep the legacy single key pointing at the first folder so older
+            # readers still work.
+            config['tv_library_path'] = self.tv_library_paths[0] if self.tv_library_paths else ''
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+        except Exception as e:
+            print(f"Could not save TV library paths: {e}")
+        self.tv_library_path = self.tv_library_paths[0] if self.tv_library_paths else ""
+
+    def _manage_tv_folders(self):
+        """Add or remove the folders that make up the TV library."""
+        win = ctk.CTkToplevel(self)
+        win.title("TV Library Folders")
+        win.configure(fg_color=ParagonTheme.BG_DARK)
+        win.transient(self)
+        win.geometry("640x430")
+        win.after(10, win.grab_set)
+
+        ParagonLabel(win, text="TV Library Folders", style="subheader").pack(
+            anchor="w", padx=20, pady=(18, 2))
+        ParagonLabel(win, text="Shows from every folder listed here appear together in the TV Library.",
+                     style="muted").pack(anchor="w", padx=20, pady=(0, 10))
+
+        list_frame = ctk.CTkScrollableFrame(win, fg_color=ParagonTheme.BG_SECONDARY)
+        list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+
+        def refresh():
+            for w in list_frame.winfo_children():
+                w.destroy()
+            if not self.tv_library_paths:
+                ParagonLabel(list_frame, text="No folders yet — click ADD FOLDER.",
+                             style="muted").pack(anchor="w", padx=10, pady=12)
+                return
+            for p in list(self.tv_library_paths):
+                row = ctk.CTkFrame(list_frame, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6)
+                row.pack(fill="x", padx=6, pady=4)
+                ctk.CTkLabel(row, text=p, text_color=ParagonTheme.TEXT_PRIMARY,
+                             font=ctk.CTkFont(size=14), anchor="w").pack(
+                    side="left", fill="x", expand=True, padx=10, pady=8)
+                def _remove(path=p):
+                    self.tv_library_paths = [x for x in self.tv_library_paths if x != path]
+                    self._save_tv_library_paths()
+                    self._update_tv_library_label()
+                    refresh()
+                ParagonSecondaryButton(row, text="✕", width=40,
+                                       command=_remove).pack(side="right", padx=8, pady=6)
+
+        def add():
+            folder = filedialog.askdirectory(title="Select a TV Library Folder", parent=win)
+            if folder and folder not in self.tv_library_paths:
+                self.tv_library_paths.append(folder)
+                self._save_tv_library_paths()
+                self._update_tv_library_label()
+                refresh()
+
+        refresh()
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(0, 16))
+        ParagonButton(btns, text="📁 ADD FOLDER", width=170, command=add).pack(side="left")
+
+        def _close():
             try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                
-                config['tv_library_path'] = folder
-                
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except Exception as e:
-                print(f"Could not save TV library path: {e}")
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+        ParagonSecondaryButton(btns, text="DONE", width=110, command=_close).pack(side="right")
     
     def _load_movie_library_path(self):
         """Load saved Movie library path"""
@@ -15539,37 +15655,20 @@ MusicBrainz Album Lookup:
         if fanart_key:
             FanartTVAPI.set_api_key(fanart_key)
         
-        # Use saved path if available, otherwise prompt
-        folder = getattr(self, 'tv_library_path', '') if hasattr(self, 'tv_library_path') else ''
-        
-        if not folder or not os.path.isdir(folder):
+        # Use saved folder(s) if available, otherwise prompt for the first one.
+        folders = [p for p in getattr(self, 'tv_library_paths', []) if os.path.isdir(p)]
+
+        if not folders:
             # Ask user to select a folder containing TV shows
             folder = filedialog.askdirectory(title="Select TV Library Folder (contains TV show folders)")
             if not folder:
                 return
-            
-            # Save the selected folder
-            self.tv_library_path = folder
-            display_path = folder
-            if len(display_path) > 35:
-                display_path = "..." + display_path[-32:]
-            if hasattr(self, 'tv_library_label'):
-                self.tv_library_label.configure(text=display_path, text_color=ParagonTheme.TEXT_PRIMARY)
-            
-            # Save to config
-            config_path = Path.home() / ".pyrenamer_config.json"
-            try:
-                config = {}
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                config['tv_library_path'] = folder
-                with open(config_path, 'w') as f:
-                    json.dump(config, f)
-            except:
-                pass
-        
-        dialog = TVLibraryDialog(self, folder)
+            self.tv_library_paths = [folder]
+            self._save_tv_library_paths()
+            self._update_tv_library_label()
+            folders = [folder]
+
+        dialog = TVLibraryDialog(self, folders)
     
     def _open_tag_editor(self):
         """Open the full tag editor window"""
