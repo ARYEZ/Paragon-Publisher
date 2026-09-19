@@ -86,11 +86,16 @@ FULLWIDTH_MAP = {
 }
 
 def normalize_fullwidth(text):
-    """Fold YouTube's fullwidth filename stand-ins back to ASCII punctuation."""
+    """Fold YouTube's fullwidth filename stand-ins back to ASCII punctuation,
+    and turn the Unicode replacement character (U+FFFD, the '�' a failed byte
+    decode leaves behind) into a plain space -- so 'yellow�bus' reads
+    'yellow bus' rather than keeping the black-diamond glyph. Callers collapse
+    the resulting whitespace, so a stray '�' never leaves a double space."""
     if not text:
         return text
     for fw, ascii_ch in FULLWIDTH_MAP.items():
         text = text.replace(fw, ascii_ch)
+    text = text.replace('�', ' ')
     return text
 
 # Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
