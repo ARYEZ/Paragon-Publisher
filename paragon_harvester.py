@@ -20,7 +20,10 @@ except ImportError:
     FileSystemEventHandler = object
 
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv")
-SUMMARY_FILE = "summaries.json"
+# Anchor summaries.json next to this module (the addon folder) so the counter
+# store is the same file no matter what working directory the app is launched
+# from. Both the processor and the GUI reset read/write this one path.
+SUMMARY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "summaries.json")
 AUTO_MONITOR = False  # Set to True to enable auto-monitoring by default (CLI -m also enables it)
 ENABLE_EXTENDED_NAMING = True  # Set to False to disable extended filename format
 
