@@ -138,10 +138,16 @@ SEO_KEYWORDS = (
 # never part of a real episode name.
 DURATION_RE = re.compile(r'\b\d+\s*(?:hours?|hrs?|minutes?|mins?)\b', re.IGNORECASE)
 
-# En/em dash / horizontal bar used as a "Name — subtitle" separator. The plain
-# ASCII hyphen (U+002D) is intentionally excluded (real words like "Sci-Fi" use
-# it, and it's the extended-name field delimiter).
-DASH_RE = re.compile(r'[–—―]')
+# Separators channels use between a name and a subtitle/SEO tail: en/em dashes,
+# horizontal bar, and bullets/dots. The plain ASCII hyphen (U+002D) is
+# intentionally excluded (real words like "Sci-Fi" use it, and it's the
+# extended-name field delimiter).
+SEPARATOR_RE = re.compile(
+    "[–—―"          # – — ― en/em dash, horizontal bar
+    "•‣⁃∙"     # • ‣ ⁃ ∙ bullets
+    "·・‧°"     # · ・ ‧ ° middle dots / degree
+    "●○◦◆▪▫]"  # ● ○ ◦ ◆ ▪ ▫ geometric bullets
+)
 
 def strip_hashes(text):
     """Drop stray '#' (leaked hashtags) and collapse the whitespace left."""
@@ -163,10 +169,18 @@ def sanitize_filename(text):
         return text
     text = normalize_fullwidth(text)
     text = EMOJI_RE.sub('', text)
+    text = SEPARATOR_RE.sub(' ', text)  # drop stray bullets/dots/dashes
     text = text.replace('#', ' ')       # drop leaked hashtags
     for ch in INVALID_FILENAME_CHARS:
         text = text.replace(ch, '')
     return ' '.join(text.split()).strip()
+
+def _collapse_delimiter(text):
+    """A field can't contain ' - ' (the extended-name delimiter) or the name
+    won't parse back into fields. Collapse any ' - ' run to a single space."""
+    if not text:
+        return text
+    return ' '.join(re.sub(r'\s+-\s+', ' ', text).split())
 
 def clean_title(title):
     # Show/title text for NFOs and folders: ASCII-fold, drop emoji and stray
@@ -724,6 +738,11 @@ def rename_to_extended_format(video_path, show_name, genre):
         if not genre:
             genre = "Unknown"
         genre = sanitize_filename(genre)
+        # No field may contain the ' - ' delimiter, or the name can't be parsed
+        # back into fields. Collapse it to a space in each.
+        episode_title = _collapse_delimiter(episode_title)
+        show_name = _collapse_delimiter(show_name)
+        genre = _collapse_delimiter(genre)
         
         # Build new filename
         new_base = f"{season_num}x{episode_num} - {episode_title} - {show_name} - {genre} - {resolution} - {audio_channels} - {audio_codec} - None"
@@ -824,11 +843,12 @@ def clean_episode_title(title):
         title = title.split('|')[0]
         log(f"DEBUG - After pipe cut: '{title}'")
 
-    # Same for an en/em dash separator ("Name — The Subtitle"): keep the name.
-    _dash = DASH_RE.search(title)
-    if _dash and title[:_dash.start()].strip():
-        title = title[:_dash.start()]
-        log(f"DEBUG - After dash cut: '{title}'")
+    # Same for an en/em dash or bullet separator ("Name — Subtitle",
+    # "Name • Subtitle"): keep the name before it.
+    _sep = SEPARATOR_RE.search(title)
+    if _sep and title[:_sep.start()].strip():
+        title = title[:_sep.start()]
+        log(f"DEBUG - After separator cut: '{title}'")
 
     # Same idea for a decorative emoji separator ("Real Title ✨ SEO keywords") --
     # cut at the first emoji/symbol.
@@ -2185,9 +2205,9 @@ def retitle_extended_files(folder, apply=False):
                 continue
             prefix, old_title, show, genre, res, ch, codec, ext = parsed
             readable = clean_episode_title(old_title)
-            safe_title = sanitize_filename(readable)
-            safe_show = sanitize_filename(show)
-            safe_genre = sanitize_filename(genre)
+            safe_title = _collapse_delimiter(sanitize_filename(readable))
+            safe_show = _collapse_delimiter(sanitize_filename(show))
+            safe_genre = _collapse_delimiter(sanitize_filename(genre))
             if not safe_title:
                 continue
             new_base = f"{prefix} - {safe_title} - {safe_show} - {safe_genre} - {res} - {ch} - {codec} - None"
