@@ -271,6 +271,78 @@ def get_youtube_metadata(video_id, cookies_file=None, cookies_from_browser=None)
 
     return None
 
+# --- Playlist title matching -------------------------------------------------
+# When a downloaded file has lost its [videoid] (e.g. an earlier rename), we can
+# still recover the exact video by matching its remaining title fragment against
+# the real titles in the show's playlist -- a bounded, reliable match, unlike a
+# fuzzy channel search across dozens of near-identical titles.
+
+PLAYLIST_MATCH_THRESHOLD = 0.33  # >= auto-accept; below -> ask the user
+_PLAYLIST_CACHE = {}
+
+def _norm_for_match(s):
+    """Normalise a title for comparison: ASCII-fold, drop emoji, lowercase and
+    reduce to alphanumeric words."""
+    s = strip_emoji(normalize_fullwidth(s or ""))
+    s = re.sub(r"[^a-z0-9]+", " ", s.lower())
+    return " ".join(s.split())
+
+def title_match_score(fragment, title):
+    """0..1 similarity between a filename fragment and a full video title. A
+    fragment fully contained in the title scores high; otherwise fall back to
+    token-overlap / sequence similarity."""
+    f = _norm_for_match(fragment)
+    t = _norm_for_match(title)
+    if not f or not t:
+        return 0.0
+    if f in t:
+        return max(0.6, len(f) / len(t))
+    import difflib
+    seq = difflib.SequenceMatcher(None, f, t).ratio()
+    ftoks, ttoks = set(f.split()), set(t.split())
+    jac = len(ftoks & ttoks) / len(ftoks | ttoks) if (ftoks | ttoks) else 0.0
+    return max(seq, jac)
+
+def list_playlist_entries(url, cookies_file=None, cookies_from_browser=None):
+    """Return [(video_id, title), ...] for a playlist/channel URL, cached per
+    run so a channel is only listed once."""
+    if not url:
+        return []
+    if url in _PLAYLIST_CACHE:
+        return _PLAYLIST_CACHE[url]
+    cmd = ['yt-dlp', '--flat-playlist', '--ignore-errors', '--no-warnings',
+           '--print', '%(id)s\t%(title)s']
+    cmd += _ytdlp_extractor_args(cookies_file, cookies_from_browser)
+    cmd.append(url)
+    entries = []
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=120)
+        for line in (out.stdout or "").splitlines():
+            if '\t' in line:
+                vid, title = line.split('\t', 1)
+                vid = vid.strip()
+                if vid:
+                    entries.append((vid, title.strip()))
+        if not entries:
+            err = (out.stderr or "").strip().splitlines()
+            log(f"Playlist listing returned no entries for {url}"
+                + (f" ({err[-1]})" if err else ""))
+    except Exception as e:
+        log(f"Warning: could not list playlist {url}: {e}")
+    _PLAYLIST_CACHE[url] = entries
+    return entries
+
+def best_playlist_match(fragment, entries):
+    """Return (video_id, title, score) for the best-matching playlist entry, or
+    (None, None, 0.0) if there are no entries."""
+    best = (None, None, 0.0)
+    for vid, title in entries:
+        score = title_match_score(fragment, title)
+        if score > best[2]:
+            best = (vid, title, score)
+    return best
+
 def clean_description(description, video_title, channel_name):
     """Clean up YouTube description by removing promotional content"""
     # Fold the Unicode replacement char ('�' from a failed byte decode) to a
@@ -809,7 +881,8 @@ def clean_episode_title(title):
     return strip_4byte_chars(title)
 
 def process_file(file_path, destination_folder, default_genre, nfo_handling, show_data, source_folder,
-                 new_show_cb=None, cookies_file=None, cookies_from_browser=None):
+                 new_show_cb=None, cookies_file=None, cookies_from_browser=None,
+                 playlist_url=None, confirm_match_cb=None):
     """Processes a single video file.
 
     new_show_cb, when given, makes the first-sighting of a show non-interactive
@@ -864,7 +937,8 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
             "episode": 1,
             "genre": None,
             "summary": None,
-            "channel": None
+            "channel": None,
+            "playlist": None
         }
 
         # Generate default summary
@@ -880,6 +954,7 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
             show_data[show_key]["genre"] = resolved_genre
             resolved_channel = info.get("channel") or DEFAULT_CHANNEL
             show_data[show_key]["channel"] = resolved_channel or None
+            show_data[show_key]["playlist"] = info.get("playlist") or playlist_url or None
         else:
             log(f"\nSuggested summary for '{show_key}':")
             log(f"----------\n{default_summary}\n----------")
@@ -916,6 +991,7 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
     else:
         # Backfill the channel field for data written by older versions
         show_data[show_key].setdefault("channel", None)
+        show_data[show_key].setdefault("playlist", None)
         show_data[show_key]["episode"] += 1
         if show_data[show_key]["episode"] > 24:
             show_data[show_key]["episode"] = 1
@@ -923,6 +999,10 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
 
     # Effective channel: the per-show stored value wins, else the CLI default.
     effective_channel = show_data[show_key].get("channel") or DEFAULT_CHANNEL
+    # Effective playlist: a per-round override (playlist_url) wins for this run;
+    # otherwise the value saved with the show. Used to recover the exact video
+    # by title when the filename no longer carries a [videoid].
+    effective_playlist = playlist_url or show_data[show_key].get("playlist")
 
     # Try to extract YouTube video ID from filename first
     video_id = extract_video_id(filename)
@@ -933,19 +1013,42 @@ def process_file(file_path, destination_folder, default_genre, nfo_handling, sho
         log(f"Found YouTube video ID in filename: {video_id}")
         youtube_metadata = get_youtube_metadata(video_id, cookies_file, cookies_from_browser)
     else:
-        # No video ID found - search YouTube by title
-        # Combine show name and episode title for better search
-        search_query = f"{show_name} {episode_title}"
-        if effective_channel:
-            log(f"No video ID found, searching channel '{effective_channel}' for: '{search_query}'")
-        else:
-            log(f"No video ID found, searching YouTube for: '{search_query}'")
-        video_id = search_youtube_by_title(search_query, effective_channel,
-                                           cookies_file, cookies_from_browser)
+        # No [videoid] in the filename. If we know the playlist, match the
+        # filename fragment against the real titles there -- bounded and exact,
+        # unlike a fuzzy channel search across many near-identical titles.
+        fragment = os.path.splitext(os.path.basename(file_path))[0]
+        if effective_playlist:
+            entries = list_playlist_entries(effective_playlist, cookies_file, cookies_from_browser)
+            if entries:
+                bid, btitle, score = best_playlist_match(fragment, entries)
+                if bid:
+                    accept = score >= PLAYLIST_MATCH_THRESHOLD
+                    if not accept and confirm_match_cb is not None:
+                        accept = bool(confirm_match_cb(fragment, btitle, score))
+                    if accept:
+                        log(f"Playlist match {int(score*100)}%: '{fragment}' -> '{btitle}' [{bid}]")
+                        video_id = bid
+                        # Remember the playlist on the show if it had none saved
+                        # (a per-round override stays transient for shows that do).
+                        if playlist_url and not show_data[show_key].get("playlist"):
+                            show_data[show_key]["playlist"] = playlist_url
+                    else:
+                        log(f"Playlist match too weak ({int(score*100)}%) and declined; skipping.")
         if video_id:
             youtube_metadata = get_youtube_metadata(video_id, cookies_file, cookies_from_browser)
         else:
-            log("Could not find video on YouTube, using generic metadata")
+            # Fall back to a channel/global title search.
+            search_query = f"{show_name} {episode_title}"
+            if effective_channel:
+                log(f"No video ID found, searching channel '{effective_channel}' for: '{search_query}'")
+            else:
+                log(f"No video ID found, searching YouTube for: '{search_query}'")
+            video_id = search_youtube_by_title(search_query, effective_channel,
+                                               cookies_file, cookies_from_browser)
+            if video_id:
+                youtube_metadata = get_youtube_metadata(video_id, cookies_file, cookies_from_browser)
+            else:
+                log("Could not find video on YouTube, using generic metadata")
     
     # Clean up the episode title
     episode_title = clean_episode_title(episode_title)
@@ -1190,6 +1293,7 @@ def _load_show_data(summary_file):
                 data.setdefault("summary", None)
                 data.setdefault("genre", None)
                 data.setdefault("channel", None)
+                data.setdefault("playlist", None)
     except FileNotFoundError:
         pass
     except json.JSONDecodeError:
@@ -1199,7 +1303,8 @@ def _load_show_data(summary_file):
 
 def run_harvest(source_folder, destination_folder, default_genre="", nfo_handling="skip",
                 channel=None, new_show_cb=None, should_stop=None, summary_file=None,
-                cookies_file=None, cookies_from_browser=None):
+                cookies_file=None, cookies_from_browser=None,
+                playlist_url=None, confirm_match_cb=None):
     """One-shot organize of every video under source_folder into destination_folder.
 
     Non-interactive: new_show_cb resolves per-show metadata (see process_file).
@@ -1243,7 +1348,8 @@ def run_harvest(source_folder, destination_folder, default_genre="", nfo_handlin
                 try:
                     process_file(file_path, destination_folder, default_genre,
                                  nfo_handling, show_data, source_folder, new_show_cb=new_show_cb,
-                                 cookies_file=cookies_file, cookies_from_browser=cookies_from_browser)
+                                 cookies_file=cookies_file, cookies_from_browser=cookies_from_browser,
+                                 playlist_url=playlist_url, confirm_match_cb=confirm_match_cb)
                 except Exception as e:
                     log(f"Error processing {os.path.basename(file_path)}: {e}")
         if aborted:
@@ -1912,6 +2018,7 @@ def reset_show(show_name_input):
         "episode": 0,
         "genre": new_genre,
         "summary": new_summary,
+        "playlist": current.get("playlist"),
         "channel": new_channel
     }
 

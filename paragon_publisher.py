@@ -18102,6 +18102,18 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.channel_entry.insert(0, cfg.get("harvester_channel", ""))
         self.channel_entry.pack(side="left", padx=(6, 0))
 
+        # Match-playlist row: recover the exact video (for its plot/metadata) by
+        # matching a filename fragment against this playlist's real titles. Blank
+        # = use the playlist saved with each show; a value here overrides it for
+        # this run.
+        pl = ctk.CTkFrame(form, fg_color="transparent")
+        pl.pack(fill="x", padx=12, pady=(0, 6))
+        ParagonLabel(pl, text="Match playlist", style="muted", width=110, anchor="w").pack(side="left")
+        self.match_playlist_entry = ParagonEntry(pl)
+        self.match_playlist_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        ParagonLabel(pl, text="(optional · blank uses each show's saved playlist)",
+                     style="muted", anchor="w").pack(side="left")
+
         # NFO handling + hint row
         nf = ctk.CTkFrame(form, fg_color="transparent")
         nf.pack(fill="x", padx=12, pady=(2, 10))
@@ -18469,6 +18481,35 @@ class HarvesterDialog(ctk.CTkToplevel):
             return holder.get("result") or defaults
         return cb
 
+    def _make_confirm_match_cb(self):
+        """Callback the harvester calls when a playlist match scores below the
+        auto-accept threshold: pops a yes/no on the main thread and blocks the
+        worker until answered. Returns True to accept the proposed match."""
+        def cb(fragment, proposed_title, score):
+            if not self.winfo_exists():
+                return False
+            holder = {}
+            done = threading.Event()
+
+            def ask():
+                try:
+                    holder["ok"] = messagebox.askyesno(
+                        "Confirm episode match",
+                        f"Low-confidence match ({int(score * 100)}%).\n\n"
+                        f"File:\n    {fragment}\n\n"
+                        f"Proposed video:\n    {proposed_title}\n\n"
+                        "Use this video's info for the episode?",
+                        parent=self)
+                except Exception:
+                    holder["ok"] = False
+                finally:
+                    done.set()
+
+            self.after(0, ask)
+            done.wait()
+            return bool(holder.get("ok"))
+        return cb
+
     # ---- actions --------------------------------------------------------
     def _validate(self):
         source = self.source_entry.get().strip()
@@ -18511,6 +18552,8 @@ class HarvesterDialog(ctk.CTkToplevel):
         _ck = self.cookies_var.get()
         cookies_from_browser = None if _ck == "none" else _ck
         cookies_file = self.cookies_file_entry.get().strip() or None
+        playlist_url = self.match_playlist_entry.get().strip() or None
+        confirm_match_cb = self._make_confirm_match_cb()
         self._stop_event.clear()
         self._busy(True, monitoring=False)
         self._set_status("Processing...")
@@ -18524,7 +18567,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                     source, dest, default_genre=default_genre, nfo_handling=nfo_handling,
                     channel=channel, new_show_cb=self._make_new_show_cb(default_genre, channel),
                     should_stop=self._stop_event.is_set,
-                    cookies_file=cookies_file, cookies_from_browser=cookies_from_browser) or 0
+                    cookies_file=cookies_file, cookies_from_browser=cookies_from_browser,
+                    playlist_url=playlist_url, confirm_match_cb=confirm_match_cb) or 0
             except Exception as e:
                 errored = True
                 self._log(f"ERROR: {e}")
@@ -18589,6 +18633,8 @@ class HarvesterDialog(ctk.CTkToplevel):
         cookies = self.cookies_var.get()
         cookies_from_browser = None if cookies == "none" else cookies
         cookies_file = self.cookies_file_entry.get().strip() or None
+        playlist_url = self.match_playlist_entry.get().strip() or None
+        confirm_match_cb = self._make_confirm_match_cb()
         try:
             import shlex
             extra_args = shlex.split(self.extra_args_entry.get().strip())
@@ -18634,7 +18680,9 @@ class HarvesterDialog(ctk.CTkToplevel):
                             new_show_cb=self._make_new_show_cb(default_genre, channel),
                             should_stop=self._stop_event.is_set,
                             cookies_file=cookies_file,
-                            cookies_from_browser=cookies_from_browser) or 0
+                            cookies_from_browser=cookies_from_browser,
+                            playlist_url=playlist_url,
+                            confirm_match_cb=confirm_match_cb) or 0
                     if not repeat_min or self._stop_event.is_set():
                         break
                     self._set_status(f"Waiting {repeat_min} min for next run...")
