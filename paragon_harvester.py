@@ -123,6 +123,21 @@ def strip_emoji(text):
         return text
     return ' '.join(EMOJI_RE.sub(' ', text).split())
 
+# SEO/keyword phrases these channels pad titles with. Shared by the comma-tail
+# and the colon-tail cuts in clean_episode_title.
+SEO_KEYWORDS = (
+    'music to', 'music for', 'study', 'studying', 'sleep', 'relax',
+    'relaxing', 'focus', 'meditation', 'meditate', 'ambient', 'background',
+    'concentration', 'deep work', 'calm', 'chill', 'stress relief', 'insomnia',
+    'healing', 'for work', 'for studying', 'no copyright', 'royalty free',
+    'white noise', 'soundscape',
+)
+
+# A duration phrase like "30 Minutes", "1 Hour", "45 mins" -- in these titles it
+# always starts an SEO descriptor ("... 30 Minutes Of Relaxing Ambient ..."),
+# never part of a real episode name.
+DURATION_RE = re.compile(r'\b\d+\s*(?:hours?|hrs?|minutes?|mins?)\b', re.IGNORECASE)
+
 # Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
 # human-readable title (and kept in NFO text) but must be stripped from the
 # on-disk name, or os.rename fails with WinError 123.
@@ -801,6 +816,25 @@ def clean_episode_title(title):
         title = title[:_em.start()]
         log(f"DEBUG - After emoji cut: '{title}'")
 
+    # Cut at a ':' when what follows is SEO padding (a duration phrase or an SEO
+    # keyword), so "Neon Serenity: 30 Minutes Of Relaxing ..." -> "Neon Serenity"
+    # while "Signal 05: High Risk" (real subtitle) is left intact.
+    if ':' in title:
+        head, _, tail = title.partition(':')
+        low = tail.lower()
+        if head.strip() and (DURATION_RE.search(low) or any(kw in low for kw in SEO_KEYWORDS)):
+            title = head
+            log(f"DEBUG - After colon SEO cut: '{title}'")
+
+    # Cut a trailing SEO descriptor that begins with a duration phrase even
+    # without a separator, e.g. "Neon Serenity 30 Minutes Of Relaxing ... Sleep"
+    # -> "Neon Serenity". (If it's at the very start there's no real name to
+    # keep, so the length guard below restores the original.)
+    _dur = DURATION_RE.search(title)
+    if _dur and title[:_dur.start()].strip():
+        title = title[:_dur.start()]
+        log(f"DEBUG - After duration cut: '{title}'")
+
     # For video suffixes, use a safer word boundary approach
     title = re.sub(r' official music video$', '', title, flags=re.IGNORECASE)
     title = re.sub(r' music video$', '', title, flags=re.IGNORECASE)
@@ -847,18 +881,11 @@ def clean_episode_title(title):
     # segments until one looks like keyword padding, and cut there. This is
     # conservative: a legit title like "Signal 05, Part 2" is left intact.
     if ',' in title:
-        seo_keywords = (
-            'music to', 'music for', 'study', 'studying', 'sleep', 'relax',
-            'relaxing', 'focus', 'meditation', 'meditate', 'ambient',
-            'background', 'concentration', 'deep work', 'calm', 'chill',
-            'stress relief', 'insomnia', 'healing', 'for work', 'for studying',
-            'no copyright', 'royalty free', 'white noise', 'soundscape',
-        )
         parts = title.split(',')
         kept = [parts[0]]
         for seg in parts[1:]:
             low = seg.lower()
-            if any(kw in low for kw in seo_keywords):
+            if any(kw in low for kw in SEO_KEYWORDS):
                 break
             kept.append(seg)
         title = ','.join(kept)
