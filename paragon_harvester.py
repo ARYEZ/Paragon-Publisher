@@ -155,6 +155,15 @@ def strip_hashes(text):
         return text
     return ' '.join(text.replace('#', ' ').split())
 
+def amp_to_and(text):
+    """Spell '&' (and its XML-escaped form '&amp;') as the word 'and' for
+    readable plot text. Preserves newlines; only tidies the spaces around it."""
+    if not text:
+        return text
+    text = re.sub(r'\s*&amp;\s*', ' and ', text)
+    text = re.sub(r'\s*&\s*', ' and ', text)
+    return re.sub(r'[ \t]{2,}', ' ', text)
+
 # Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
 # human-readable title (and kept in NFO text) but must be stripped from the
 # on-disk name, or os.rename fails with WinError 123.
@@ -394,9 +403,9 @@ def clean_description(description, video_title, channel_name):
     # through descriptions, so the plot reads as clean prose. For the raw
     # description we replace emoji with a space (not strip_emoji) so the '\n'
     # line breaks survive for the promo-line filtering below.
-    description = EMOJI_RE.sub(' ', (description or "").replace('�', ' '))
-    video_title = strip_emoji((video_title or "").replace('�', ' ')).strip()
-    channel_name = strip_emoji((channel_name or "").replace('�', ' ')).strip()
+    description = amp_to_and(EMOJI_RE.sub(' ', (description or "").replace('�', ' ')))
+    video_title = amp_to_and(strip_emoji((video_title or "").replace('�', ' '))).strip()
+    channel_name = amp_to_and(strip_emoji((channel_name or "").replace('�', ' '))).strip()
 
     if not description.strip():
         return f"{video_title} from {channel_name}"
@@ -2182,29 +2191,34 @@ def _clean_tvshow_nfo(nfo_path):
         except OSError:
             pass
 
-_NFO_TEXT_TAGS = ("plot", "outline", "title", "showtitle")
+_NFO_PLOT_TAGS = ("plot", "outline")     # prose: also spell '&' as 'and'
+_NFO_TITLE_TAGS = ("title", "showtitle")  # keep '&' to match the filename
 
-def _scrub_text(inner):
-    """Remove emoji and replacement chars from NFO tag text, preserving XML
-    entities (so '&amp;' stays intact) and only collapsing the gaps that
-    removal leaves."""
+def _scrub_text(inner, amp=False):
+    """Remove emoji and replacement chars from NFO tag text, preserving other
+    XML entities and only collapsing the gaps removal leaves. With amp=True,
+    also spell '&' as 'and' (for prose plots)."""
     out = EMOJI_RE.sub('', inner.replace('�', ''))
+    if amp:
+        out = amp_to_and(out)
     out = re.sub(r'[ \t]{2,}', ' ', out)
     return out.strip()
 
 def _scrub_nfo(path, apply=True):
-    """Strip decorative emoji from an NFO's text tags (plot, title, ...) in
-    place. Returns True if it (would) change the file."""
+    """Strip decorative emoji from an NFO's text tags (and spell '&' as 'and' in
+    the plot) in place. Returns True if it (would) change the file."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = f.read()
     except OSError:
         return False
-    def _fix(m):
-        return m.group(1) + _scrub_text(m.group(2)) + m.group(3)
+    def _mk(amp):
+        return lambda m: m.group(1) + _scrub_text(m.group(2), amp=amp) + m.group(3)
     new = data
-    for tag in _NFO_TEXT_TAGS:
-        new = re.sub(rf'(<{tag}[^>]*>)(.*?)(</{tag}>)', _fix, new, flags=re.DOTALL)
+    for tag in _NFO_PLOT_TAGS:
+        new = re.sub(rf'(<{tag}[^>]*>)(.*?)(</{tag}>)', _mk(True), new, flags=re.DOTALL)
+    for tag in _NFO_TITLE_TAGS:
+        new = re.sub(rf'(<{tag}[^>]*>)(.*?)(</{tag}>)', _mk(False), new, flags=re.DOTALL)
     if new == data:
         return False
     if apply:
