@@ -101,6 +101,28 @@ def normalize_fullwidth(text):
     text = text.replace('�', ' ')
     return text
 
+# Decorative emoji / pictographic symbols that music & ambient channels sprinkle
+# into titles -- often as a separator before SEO keywords ("Title ✨ Deep Focus
+# Sleep Music"). Many (like ✨ U+2728) sit inside the BMP, so strip_4byte_chars
+# leaves them; this covers the symbol/emoji ranges regardless of plane.
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # emoji, pictographs & supplemental symbols
+    "\U00002600-\U000027BF"   # miscellaneous symbols + dingbats (✨ ✅ ☀ ♪)
+    "\U00002B00-\U00002BFF"   # stars & arrows (⭐)
+    "\U00002190-\U000021FF"   # arrows (→ ←)
+    "\U00002300-\U000023FF"   # misc technical (⏰ ⌛ ⏳)
+    "\U0000FE00-\U0000FE0F"   # emoji variation selectors
+    "\U00002122\U00002139"    # ™ ℹ
+    "]"
+)
+
+def strip_emoji(text):
+    """Remove decorative emoji/symbols and collapse the whitespace they leave."""
+    if not text:
+        return text
+    return ' '.join(EMOJI_RE.sub(' ', text).split())
+
 # Characters that are illegal in a Windows/Kodi filename. A ':' is legal in a
 # human-readable title (and kept in NFO text) but must be stripped from the
 # on-disk name, or os.rename fails with WinError 123.
@@ -108,12 +130,13 @@ INVALID_FILENAME_CHARS = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
 
 def sanitize_filename(text):
     """Make a title safe to use as a filename component: fold fullwidth
-    stand-ins to ASCII, drop characters illegal in a filename, and collapse
-    whitespace. Only the on-disk name is sanitised; the readable title (with
-    ':' etc.) is preserved for NFO text."""
+    stand-ins to ASCII, drop emoji and characters illegal in a filename, and
+    collapse whitespace. Only the on-disk name is sanitised; the readable title
+    (with ':' etc.) is preserved for NFO text."""
     if not text:
         return text
     text = normalize_fullwidth(text)
+    text = EMOJI_RE.sub('', text)
     for ch in INVALID_FILENAME_CHARS:
         text = text.replace(ch, '')
     return ' '.join(text.split()).strip()
@@ -660,7 +683,14 @@ def clean_episode_title(title):
     if '|' in title:
         title = title.split('|')[0]
         log(f"DEBUG - After pipe cut: '{title}'")
-    
+
+    # Same idea for a decorative emoji separator ("Real Title ✨ SEO keywords") --
+    # cut at the first emoji/symbol.
+    _em = EMOJI_RE.search(title)
+    if _em:
+        title = title[:_em.start()]
+        log(f"DEBUG - After emoji cut: '{title}'")
+
     # For video suffixes, use a safer word boundary approach
     title = re.sub(r' official music video$', '', title, flags=re.IGNORECASE)
     title = re.sub(r' music video$', '', title, flags=re.IGNORECASE)
@@ -724,12 +754,19 @@ def clean_episode_title(title):
         title = ','.join(kept)
         log(f"DEBUG - After SEO tail removal: '{title}'")
 
+    # Drop any leftover decorative emoji/symbols anywhere in the title.
+    title = strip_emoji(title)
+
     # Final cleanup
     title = ' '.join(title.split())  # Remove extra spaces
     if not title or len(title) < 3:
-        log(f"WARNING - Title cleaning too aggressive, reverting to: '{original_title}'")
-        title = original_title
-    
+        # Fall back to the original with emoji stripped (so a title that was
+        # only "✨ Something" doesn't bring the black-diamond glyph back), and
+        # only to the raw original if even that is too short.
+        fallback = ' '.join(strip_emoji(original_title).split())
+        title = fallback if len(fallback) >= 3 else original_title
+        log(f"WARNING - Title cleaning too aggressive, reverting to: '{title}'")
+
     log(f"DEBUG - Final cleaned title: '{title}'")
     return strip_4byte_chars(title)
 
