@@ -2301,6 +2301,101 @@ def retitle_extended_files(folder, apply=False):
                         log(f"  Cleaned plot text: {fn}")
     return result
 
+def _rewrite_nfo_genre(nfo_path, genre):
+    """Replace the first <genre> of an NFO with `genre` (escaped), in place."""
+    try:
+        with open(nfo_path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return False
+    esc = xml_escape(strip_4byte_chars((genre or "").strip()))
+    new = re.sub(r'(<genre>).*?(</genre>)',
+                 lambda m: m.group(1) + esc + m.group(2),
+                 data, count=1, flags=re.DOTALL)
+    if new == data:
+        return False
+    try:
+        with open(nfo_path, "w", encoding="utf-8") as f:
+            f.write(new)
+        return True
+    except OSError:
+        return False
+
+def _update_saved_genre(show_name, genre):
+    """Update a show's saved genre in summaries.json so new episodes use it."""
+    try:
+        with open(SUMMARY_FILE, "r", encoding="utf-8") as f:
+            show_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return
+    key = (show_name or "").strip().title()
+    if key in show_data:
+        show_data[key]["genre"] = genre
+        try:
+            with open(SUMMARY_FILE, "w", encoding="utf-8") as f:
+                json.dump(show_data, f, indent=4)
+        except OSError:
+            pass
+
+def retitle_show_genre(folder, show_name, new_genre, apply=False):
+    """Change one show's genre everywhere under `folder`: the genre field of its
+    extended-format filenames, each episode NFO's <genre>, and the show's
+    tvshow.nfo <genre> -- plus the saved genre in summaries.json. Matches files
+    by their show field (so it only touches the chosen show). With apply=False
+    it only reports. Returns a list of (old_basename, new_basename) tuples.
+    """
+    changes = []
+    if not os.path.isdir(folder):
+        log(f"Folder not found: {folder}")
+        return changes
+    target = sanitize_filename(show_name or "").lower()
+    safe_genre = _collapse_delimiter(sanitize_filename(new_genre))
+    if not safe_genre:
+        log("No genre given.")
+        return changes
+    show_dirs = set()
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if not fn.lower().endswith(VIDEO_EXTENSIONS):
+                continue
+            parsed = parse_extended_name(fn)
+            if not parsed:
+                continue
+            prefix, title, show, genre, res, ch, codec, ext = parsed
+            if sanitize_filename(show).lower() != target:
+                continue
+            show_dirs.add(root)
+            if _collapse_delimiter(sanitize_filename(genre)) == safe_genre:
+                continue  # already this genre
+            new_base = f"{prefix} - {title} - {show} - {safe_genre} - {res} - {ch} - {codec} - None"
+            changes.append((fn, new_base + ext))
+            if not apply:
+                continue
+            old_stem = os.path.splitext(fn)[0]
+            old_video = os.path.join(root, fn)
+            new_video = os.path.join(root, new_base + ext)
+            old_nfo = os.path.join(root, old_stem + ".nfo")
+            new_nfo = os.path.join(root, new_base + ".nfo")
+            if os.path.exists(new_video) and os.path.normcase(new_video) != os.path.normcase(old_video):
+                log(f"  Skip (target exists): {new_base + ext}")
+                changes.pop()
+                continue
+            try:
+                if os.path.exists(old_nfo):
+                    _rewrite_nfo_genre(old_nfo, new_genre)
+                    os.rename(old_nfo, new_nfo)
+                os.rename(old_video, new_video)
+                log(f"  Genre -> {safe_genre}: {new_base + ext}")
+            except OSError as e:
+                log(f"  Error updating genre for {fn}: {e}")
+    if apply:
+        for d in show_dirs:
+            tvnfo = os.path.join(d, "tvshow.nfo")
+            if os.path.isfile(tvnfo):
+                _rewrite_nfo_genre(tvnfo, new_genre)
+        _update_saved_genre(show_name, new_genre)
+    return changes
+
 def reset_show_counter(show_name):
     """Non-interactive episode-counter reset for the GUI.
 

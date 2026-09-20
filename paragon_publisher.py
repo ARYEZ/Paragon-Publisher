@@ -18293,6 +18293,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                      fg_color=ParagonTheme.BG_TERTIARY,
                                                      hover_color=ParagonTheme.BG_HOVER)
         self.fix_titles_btn.pack(side="left", padx=(10, 0))
+        self.fix_genre_btn = ParagonSecondaryButton(actions, text="🎬 FIX GENRE",
+                                                    command=self._fix_genre, width=140, height=40,
+                                                    fg_color=ParagonTheme.BG_TERTIARY,
+                                                    hover_color=ParagonTheme.BG_HOVER)
+        self.fix_genre_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -18537,6 +18542,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             self.reset_show_btn.configure(state=state)
         if hasattr(self, "fix_titles_btn"):
             self.fix_titles_btn.configure(state=state)
+        if hasattr(self, "fix_genre_btn"):
+            self.fix_genre_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -18886,6 +18893,132 @@ class HarvesterDialog(ctk.CTkToplevel):
                         "Fix Titles Complete",
                         f"Renamed {len(done.get('renames', []))} file(s), "
                         f"cleaned {len(done.get('plots', []))} plot(s).")
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_genre(self):
+        """Pick a show and re-stamp it with the genre from the Default genre
+        field, across filenames, episode NFOs and tvshow.nfo."""
+        if self._worker and self._worker.is_alive():
+            return
+        new_genre = self.genre_entry.get().strip()
+        if not new_genre:
+            messagebox.showwarning(
+                "Fix Genre",
+                "Type the new genre in the 'Default genre' field first, then pick a show.",
+                parent=self)
+            return
+        shows = paragon_harvester.list_saved_shows()
+        if not shows:
+            messagebox.showinfo(
+                "Fix Genre",
+                "No shows have been processed yet, so there's nothing to change.",
+                parent=self)
+            return
+        keys = sorted(shows.keys())
+
+        def _label(k):
+            return f"{k}   (now: {shows[k].get('genre') or '—'})"
+
+        labels = [_label(k) for k in keys]
+
+        win = ctk.CTkToplevel(self)
+        win.title("Fix Genre")
+        win.configure(fg_color=ParagonTheme.BG_DARK)
+        win.transient(self)
+        win.geometry("580x240")
+        win.after(10, win.grab_set)
+
+        ParagonLabel(win, text="Set a show's genre", style="subheader").pack(
+            anchor="w", padx=20, pady=(20, 4))
+        ParagonLabel(win,
+                     text=f"The chosen show's genre becomes \"{new_genre}\" in every filename,\n"
+                          "episode NFO and tvshow.nfo (and its saved genre).",
+                     style="muted").pack(anchor="w", padx=20, pady=(0, 14))
+
+        sel = ctk.StringVar(value=labels[0])
+        ParagonOptionMenu(win, values=labels, variable=sel, width=520).pack(padx=20, pady=(0, 18))
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(0, 18))
+
+        def _close():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+
+        def _go():
+            show_key = keys[labels.index(sel.get())] if sel.get() in labels else keys[0]
+            _close()
+            self._fix_genre_scan(show_key, new_genre)
+
+        ParagonSecondaryButton(btns, text="CANCEL", width=110, command=_close).pack(side="right")
+        ParagonButton(btns, text="🎬 SET GENRE", width=150, command=_go).pack(side="right", padx=(0, 10))
+
+    def _fix_genre_scan(self, show_key, new_genre):
+        start = self.dest_entry.get().strip()
+        folder = start if (start and os.path.isdir(start)) else filedialog.askdirectory(
+            title="Select the folder that holds the show (recurses)", parent=self)
+        if not folder:
+            return
+        self._busy(True, monitoring=False)
+        self._set_status("Scanning genre...")
+
+        def work():
+            errored = False
+            try:
+                changes = paragon_harvester.retitle_show_genre(
+                    folder, show_key, new_genre, apply=False)
+                self.after(0, lambda: self._fix_genre_confirm(folder, show_key, new_genre, changes))
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR scanning genre: {e}")
+            finally:
+                self._set_status("Idle")
+                if errored and self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_genre_confirm(self, folder, show_key, new_genre, changes):
+        self._busy(False)
+        if not changes:
+            messagebox.showinfo(
+                "Fix Genre",
+                f"'{show_key}' is already genre \"{new_genre}\" in every file under:\n\n{folder}",
+                parent=self)
+            return
+        sample = "\n".join(f"  → {new}" for _, new in changes[:6])
+        more = f"\n  …and {len(changes) - 6} more." if len(changes) > 6 else ""
+        if not messagebox.askyesno(
+                "Fix Genre",
+                f"{len(changes)} file(s) for '{show_key}' will be re-stamped to genre "
+                f"\"{new_genre}\" (filenames + NFOs + tvshow.nfo):\n\n{sample}{more}\n\nProceed?",
+                parent=self):
+            return
+        self._busy(True, monitoring=False)
+        self._set_status("Fixing genre...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            done = []
+            errored = False
+            try:
+                done = paragon_harvester.retitle_show_genre(
+                    folder, show_key, new_genre, apply=True)
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR fixing genre: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+                if not errored:
+                    self._notify_complete("Fix Genre Complete",
+                                          f"Set {len(done)} file(s) to '{new_genre}'.")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
