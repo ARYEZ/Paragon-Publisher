@@ -2145,30 +2145,35 @@ def parse_extended_name(basename):
     title, show, genre, res, ch, codec, _none = segs
     return prefix, title, show, genre, res, ch, codec, ext
 
-def _rewrite_nfo_fields(nfo_path, new_title, new_show, new_file_basename):
-    """Update <title>/<showtitle>/<file> of an existing episode NFO in place,
-    preserving the rest of the file byte-for-byte."""
+def _rewrite_nfo_fields(nfo_path, new_title, new_show, new_file_basename, apply=True):
+    """Sync <title>/<showtitle>/<file> of an episode NFO to the (cleaned)
+    filename, preserving the rest byte-for-byte. Returns True if it (would)
+    change the file."""
     try:
         with open(nfo_path, "r", encoding="utf-8") as f:
             data = f.read()
     except OSError:
-        return
+        return False
     esc_title = xml_escape(strip_4byte_chars(new_title))
     esc_show = xml_escape(clean_title(new_show))
-    data = re.sub(r'(<title>).*?(</title>)',
-                  lambda m: m.group(1) + esc_title + m.group(2),
-                  data, count=1, flags=re.DOTALL)
-    data = re.sub(r'(<showtitle>).*?(</showtitle>)',
-                  lambda m: m.group(1) + esc_show + m.group(2),
-                  data, count=1, flags=re.DOTALL)
-    data = re.sub(r'(<file>).*?(</file>)',
-                  lambda m: m.group(1) + xml_escape(new_file_basename) + m.group(2),
-                  data, count=1, flags=re.DOTALL)
-    try:
-        with open(nfo_path, "w", encoding="utf-8") as f:
-            f.write(data)
-    except OSError:
-        pass
+    new = re.sub(r'(<title>).*?(</title>)',
+                 lambda m: m.group(1) + esc_title + m.group(2),
+                 data, count=1, flags=re.DOTALL)
+    new = re.sub(r'(<showtitle>).*?(</showtitle>)',
+                 lambda m: m.group(1) + esc_show + m.group(2),
+                 new, count=1, flags=re.DOTALL)
+    new = re.sub(r'(<file>).*?(</file>)',
+                 lambda m: m.group(1) + xml_escape(new_file_basename) + m.group(2),
+                 new, count=1, flags=re.DOTALL)
+    if new == data:
+        return False
+    if apply:
+        try:
+            with open(nfo_path, "w", encoding="utf-8") as f:
+                f.write(new)
+        except OSError:
+            return False
+    return True
 
 def _clean_tvshow_nfo(nfo_path):
     """Strip hashes/emoji from a tvshow.nfo's show-title fields in place."""
@@ -2233,18 +2238,22 @@ def retitle_extended_files(folder, apply=False):
     """Re-clean already-processed extended-format files under `folder`, without
     unprocessing them.
 
-    Two things: (1) re-clean the episode title (dash/bullet/emoji/SEO cuts) and
-    re-sanitise the show/genre fields (e.g. a stray '#'), renaming the video and
-    its .nfo and rewriting the NFO title/showtitle/file; (2) strip decorative
-    emoji from every NFO's <plot>/<title> text. With apply=False it only reports.
-    Returns {"renames": [(old, new), ...], "plots": [nfo_name, ...]}.
+    Three things: (1) re-clean the episode title and re-sanitise the show/genre
+    fields, renaming the video and its .nfo; (2) reconcile each episode NFO's
+    <title>/<showtitle>/<file> to the filename even when no rename is needed
+    (a clean filename with a stale NFO title); (3) strip decorative emoji from
+    every NFO's <plot>/<title> text. With apply=False it only reports. Returns
+    {"renames": [(old, new)...], "nfos": [nfo_name...], "plots": [nfo_name...]}.
     """
-    result = {"renames": [], "plots": []}
+    result = {"renames": [], "nfos": [], "plots": []}
     if not os.path.isdir(folder):
         log(f"Folder not found: {folder}")
         return result
     touched_dirs = set()
-    # Pass 1 -- rename files whose title/show/genre fields re-clean differently.
+    # Pass 1 -- re-clean each file's fields; rename if the filename changes, and
+    # ALWAYS reconcile the episode NFO's <title>/<showtitle>/<file> to the
+    # filename (even when no rename is needed, so a clean filename with a stale
+    # NFO title gets fixed).
     for root, _, files in os.walk(folder):
         for fn in files:
             if not fn.lower().endswith(VIDEO_EXTENSIONS):
@@ -2260,29 +2269,40 @@ def retitle_extended_files(folder, apply=False):
             if not safe_title:
                 continue
             new_base = f"{prefix} - {safe_title} - {safe_show} - {safe_genre} - {res} - {ch} - {codec} - None"
-            if new_base == os.path.splitext(fn)[0]:
-                continue  # nothing to change
-            if not apply:
-                result["renames"].append((fn, new_base + ext))
-                continue
             old_stem = os.path.splitext(fn)[0]
+            rename_needed = new_base != old_stem
+            old_nfo = os.path.join(root, old_stem + ".nfo")
+            if not apply:
+                if rename_needed:
+                    result["renames"].append((fn, new_base + ext))
+                elif os.path.isfile(old_nfo) and _rewrite_nfo_fields(
+                        old_nfo, readable, safe_show, new_base + ext, apply=False):
+                    result["nfos"].append(old_stem + ".nfo")
+                continue
             old_video = os.path.join(root, fn)
             new_video = os.path.join(root, new_base + ext)
-            old_nfo = os.path.join(root, old_stem + ".nfo")
             new_nfo = os.path.join(root, new_base + ".nfo")
-            if os.path.exists(new_video) and os.path.normcase(new_video) != os.path.normcase(old_video):
+            if rename_needed and os.path.exists(new_video) and \
+                    os.path.normcase(new_video) != os.path.normcase(old_video):
                 log(f"  Skip (target exists): {new_base + ext}")
                 continue
             try:
-                # Update the NFO first (while still at its old name), then rename
-                # both, so a crash never leaves a renamed video with a stale NFO.
+                # Reconcile the NFO first (while still at its old name), then
+                # rename, so a crash never leaves a renamed video with a stale NFO.
+                nfo_changed = False
                 if os.path.exists(old_nfo):
-                    _rewrite_nfo_fields(old_nfo, readable, safe_show, new_base + ext)
-                    os.rename(old_nfo, new_nfo)
-                os.rename(old_video, new_video)
-                touched_dirs.add(root)
-                result["renames"].append((fn, new_base + ext))
-                log(f"  Retitled: {fn}  ->  {new_base + ext}")
+                    nfo_changed = _rewrite_nfo_fields(old_nfo, readable, safe_show, new_base + ext)
+                if rename_needed:
+                    if os.path.exists(old_nfo):
+                        os.rename(old_nfo, new_nfo)
+                    os.rename(old_video, new_video)
+                    touched_dirs.add(root)
+                    result["renames"].append((fn, new_base + ext))
+                    log(f"  Retitled: {fn}  ->  {new_base + ext}")
+                elif nfo_changed:
+                    touched_dirs.add(root)
+                    result["nfos"].append(old_stem + ".nfo")
+                    log(f"  Synced NFO title: {old_stem}.nfo")
             except OSError as e:
                 log(f"  Error retitling {fn}: {e}")
     # Clean the show-level tvshow.nfo in folders we changed (# / title-case).

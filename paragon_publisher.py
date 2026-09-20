@@ -18853,8 +18853,9 @@ class HarvesterDialog(ctk.CTkToplevel):
     def _fix_titles_confirm(self, folder, result):
         self._busy(False)
         renames = result.get("renames", [])
+        nfos = result.get("nfos", [])
         plots = result.get("plots", [])
-        if not renames and not plots:
+        if not renames and not nfos and not plots:
             messagebox.showinfo(
                 "Fix Titles",
                 "Nothing needs cleaning under:\n\n" + folder,
@@ -18863,9 +18864,11 @@ class HarvesterDialog(ctk.CTkToplevel):
         lines = []
         if renames:
             lines.append(f"{len(renames)} file(s) will be renamed (and their NFOs updated):")
-            lines += [f"  {old}\n     → {new}" for old, new in renames[:6]]
-            if len(renames) > 6:
-                lines.append(f"  …and {len(renames) - 6} more.")
+            lines += [f"  {old}\n     → {new}" for old, new in renames[:5]]
+            if len(renames) > 5:
+                lines.append(f"  …and {len(renames) - 5} more.")
+        if nfos:
+            lines.append(f"\n{len(nfos)} NFO title(s) will be synced to their filename.")
         if plots:
             lines.append(f"\n{len(plots)} NFO plot(s) will have decorative emoji removed.")
         if not messagebox.askyesno(
@@ -18891,8 +18894,9 @@ class HarvesterDialog(ctk.CTkToplevel):
                 if not errored:
                     self._notify_complete(
                         "Fix Titles Complete",
-                        f"Renamed {len(done.get('renames', []))} file(s), "
-                        f"cleaned {len(done.get('plots', []))} plot(s).")
+                        f"Renamed {len(done.get('renames', []))} file(s), synced "
+                        f"{len(done.get('nfos', []))} NFO title(s), cleaned "
+                        f"{len(done.get('plots', []))} plot(s).")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
