@@ -2337,23 +2337,23 @@ def _update_saved_genre(show_name, genre):
         except OSError:
             pass
 
-def retitle_show_genre(folder, show_name, new_genre, apply=False):
-    """Change one show's genre everywhere under `folder`: the genre field of its
-    extended-format filenames, each episode NFO's <genre>, and the show's
-    tvshow.nfo <genre> -- plus the saved genre in summaries.json. Matches files
-    by their show field (so it only touches the chosen show). With apply=False
-    it only reports. Returns a list of (old_basename, new_basename) tuples.
+def retitle_genre_in_folder(folder, new_genre, apply=False):
+    """Set the genre of every extended-format file under `folder` to `new_genre`
+    -- the genre field of the filename, each episode NFO's <genre>, and each
+    show's tvshow.nfo <genre> -- plus the saved genre in summaries.json for every
+    show touched. Point it at one show's folder, or a parent to cover several.
+    With apply=False it only reports. Returns (old_basename, new_basename) tuples.
     """
     changes = []
     if not os.path.isdir(folder):
         log(f"Folder not found: {folder}")
         return changes
-    target = sanitize_filename(show_name or "").lower()
     safe_genre = _collapse_delimiter(sanitize_filename(new_genre))
     if not safe_genre:
         log("No genre given.")
         return changes
-    show_dirs = set()
+    touched_dirs = set()
+    shows_seen = set()
     for root, _, files in os.walk(folder):
         for fn in files:
             if not fn.lower().endswith(VIDEO_EXTENSIONS):
@@ -2362,9 +2362,7 @@ def retitle_show_genre(folder, show_name, new_genre, apply=False):
             if not parsed:
                 continue
             prefix, title, show, genre, res, ch, codec, ext = parsed
-            if sanitize_filename(show).lower() != target:
-                continue
-            show_dirs.add(root)
+            shows_seen.add(show)
             if _collapse_delimiter(sanitize_filename(genre)) == safe_genre:
                 continue  # already this genre
             new_base = f"{prefix} - {title} - {show} - {safe_genre} - {res} - {ch} - {codec} - None"
@@ -2385,15 +2383,17 @@ def retitle_show_genre(folder, show_name, new_genre, apply=False):
                     _rewrite_nfo_genre(old_nfo, new_genre)
                     os.rename(old_nfo, new_nfo)
                 os.rename(old_video, new_video)
+                touched_dirs.add(root)
                 log(f"  Genre -> {safe_genre}: {new_base + ext}")
             except OSError as e:
                 log(f"  Error updating genre for {fn}: {e}")
     if apply:
-        for d in show_dirs:
+        for d in touched_dirs:
             tvnfo = os.path.join(d, "tvshow.nfo")
             if os.path.isfile(tvnfo):
                 _rewrite_nfo_genre(tvnfo, new_genre)
-        _update_saved_genre(show_name, new_genre)
+        for show in shows_seen:
+            _update_saved_genre(show, new_genre)
     return changes
 
 def reset_show_counter(show_name):
