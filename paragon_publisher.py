@@ -532,6 +532,68 @@ class ParagonTheme:
     BORDER_DARK = "#333333"       # Subtle borders
 
 
+# Selectable UI palettes. "Crimson" mirrors the original ParagonTheme values;
+# "Paragon Home" leans into the redder, orange-accented look of the web UI
+# (brighter red titles/accents, red-tinted hovers and borders).
+THEMES = {
+    "Crimson": {
+        "BG_DARK": "#0a0a0a", "BG_SECONDARY": "#111111", "BG_TERTIARY": "#1a1a1a",
+        "BG_HOVER": "#252525",
+        "RED_PRIMARY": "#cc2200", "RED_LIGHT": "#ff4444", "RED_DARK": "#8b1500",
+        "ORANGE": "#ff4444", "GOLD": "#ff6600", "GOLD_LIGHT": "#ff8533",
+        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#b0b0b0",
+        "TEXT_MUTED": "#777777", "TEXT_DISABLED": "#666666",
+        "SUCCESS": "#44dd88", "ERROR": "#ff4444", "WARNING": "#ffaa00",
+        "BORDER_GOLD": "#ff6600", "BORDER_RED": "#8b1500", "BORDER_DARK": "#333333",
+    },
+    "Paragon Home": {
+        "BG_DARK": "#0b0b0d", "BG_SECONDARY": "#141417", "BG_TERTIARY": "#1d1a1c",
+        "BG_HOVER": "#2b1a1c",
+        "RED_PRIMARY": "#e01e1e", "RED_LIGHT": "#ff3b30", "RED_DARK": "#a01414",
+        "ORANGE": "#ff5a2a", "GOLD": "#ff6a00", "GOLD_LIGHT": "#ff9248",
+        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#c9bfbf",
+        "TEXT_MUTED": "#8a7f7f", "TEXT_DISABLED": "#5f5757",
+        "SUCCESS": "#3ad07a", "ERROR": "#ff3b30", "WARNING": "#ffb02a",
+        "BORDER_GOLD": "#ff6a00", "BORDER_RED": "#e01e1e", "BORDER_DARK": "#3a2020",
+    },
+}
+
+
+def apply_theme(name):
+    """Set ParagonTheme's colors from a named palette (falls back to Crimson).
+    Must run before any widget is built. Returns the resolved theme name."""
+    resolved = name if name in THEMES else "Crimson"
+    for key, value in THEMES[resolved].items():
+        setattr(ParagonTheme, key, value)
+    return resolved
+
+
+def get_saved_theme():
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        if p.exists():
+            with open(p, "r") as f:
+                name = json.load(f).get("ui_theme", "Crimson")
+                return name if name in THEMES else "Crimson"
+    except Exception:
+        pass
+    return "Crimson"
+
+
+def set_saved_theme(name):
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        cfg = {}
+        if p.exists():
+            with open(p, "r") as f:
+                cfg = json.load(f)
+        cfg["ui_theme"] = name
+        with open(p, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+
 # =============================================================================
 # RENAME RULES
 # =============================================================================
@@ -15107,7 +15169,18 @@ MusicBrainz Album Lookup:
             fanart_inner, text="SAVE", width=60,
             command=self._save_fanart_api_key
         ).pack(side="left")
-        
+
+        # Interface theme row
+        theme_inner = ctk.CTkFrame(api_frame, fg_color="transparent")
+        theme_inner.pack(fill="x", padx=10, pady=(0, 8))
+        ParagonLabel(theme_inner, text="Interface Theme:", style="muted").pack(side="left")
+        self.theme_var = ctk.StringVar(value=get_saved_theme())
+        ParagonOptionMenu(
+            theme_inner, values=list(THEMES.keys()), variable=self.theme_var,
+            width=180, command=self._on_theme_change
+        ).pack(side="left", padx=(10, 5))
+        ParagonLabel(theme_inner, text="(applies on restart)", style="muted").pack(side="left")
+
         # TV Library folder row
         library_inner = ctk.CTkFrame(api_frame, fg_color="transparent")
         library_inner.pack(fill="x", padx=10, pady=(0, 8))
@@ -15298,7 +15371,15 @@ MusicBrainz Album Lookup:
             messagebox.showinfo("Saved", "Fanart.tv API key saved successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Could not save config: {e}")
-    
+
+    def _on_theme_change(self, name):
+        """Persist the chosen UI theme; it applies on the next launch."""
+        set_saved_theme(name)
+        messagebox.showinfo(
+            "Interface Theme",
+            f"'{name}' theme saved.\n\nRestart Paragon to apply it.",
+            parent=self)
+
     def _load_tv_library_path(self):
         """Load saved TV library folder(s).
 
@@ -19420,6 +19501,8 @@ def main():
             ctk.deactivate_automatic_dpi_awareness()
         except Exception:
             pass
+    # Apply the selected UI palette before any widget is built.
+    apply_theme(get_saved_theme())
     app = PyRenamerApp()
     app.mainloop()
 
