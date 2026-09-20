@@ -18935,28 +18935,35 @@ class HarvesterDialog(ctk.CTkToplevel):
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
-    def _fix_genre_confirm(self, folder, new_genre, changes):
+    def _fix_genre_confirm(self, folder, new_genre, result):
         self._busy(False)
-        if not changes:
+        renames = result.get("renames", [])
+        tvshows = result.get("tvshows", [])
+        if not renames and not tvshows:
             messagebox.showinfo(
                 "Fix Genre",
                 f"Everything under:\n\n{folder}\n\nis already genre \"{new_genre}\".",
                 parent=self)
             return
-        sample = "\n".join(f"  → {new}" for _, new in changes[:6])
-        more = f"\n  …and {len(changes) - 6} more." if len(changes) > 6 else ""
-        if not messagebox.askyesno(
-                "Fix Genre",
-                f"{len(changes)} file(s) will be re-stamped to genre \"{new_genre}\" "
-                f"(filenames + episode NFOs + tvshow.nfo):\n\n{sample}{more}\n\nProceed?",
-                parent=self):
+        lines = []
+        if renames:
+            lines.append(f"{len(renames)} file(s) will be re-stamped to \"{new_genre}\" "
+                         "(filenames + episode NFOs):")
+            lines += [f"  → {new}" for _, new in renames[:5]]
+            if len(renames) > 5:
+                lines.append(f"  …and {len(renames) - 5} more.")
+        if tvshows:
+            lines.append(f"\n{len(tvshows)} tvshow.nfo will be set to \"{new_genre}\": "
+                         + ", ".join(tvshows[:6])
+                         + (" …" if len(tvshows) > 6 else ""))
+        if not messagebox.askyesno("Fix Genre", "\n".join(lines) + "\n\nProceed?", parent=self):
             return
         self._busy(True, monitoring=False)
         self._set_status("Fixing genre...")
 
         def work():
             paragon_harvester.set_logger(self._log)
-            done = []
+            done = {"renames": [], "tvshows": []}
             errored = False
             try:
                 done = paragon_harvester.retitle_genre_in_folder(
@@ -18970,8 +18977,10 @@ class HarvesterDialog(ctk.CTkToplevel):
                 if self.winfo_exists():
                     self.after(0, lambda: self._busy(False))
                 if not errored:
-                    self._notify_complete("Fix Genre Complete",
-                                          f"Set {len(done)} file(s) to '{new_genre}'.")
+                    self._notify_complete(
+                        "Fix Genre Complete",
+                        f"Set {len(done.get('renames', []))} file(s) and "
+                        f"{len(done.get('tvshows', []))} tvshow.nfo to '{new_genre}'.")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
