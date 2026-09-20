@@ -18298,6 +18298,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                     fg_color=ParagonTheme.BG_TERTIARY,
                                                     hover_color=ParagonTheme.BG_HOVER)
         self.fix_genre_btn.pack(side="left", padx=(10, 0))
+        self.fix_plots_btn = ParagonSecondaryButton(actions, text="📝 FIX PLOTS",
+                                                    command=self._fix_plots, width=140, height=40,
+                                                    fg_color=ParagonTheme.BG_TERTIARY,
+                                                    hover_color=ParagonTheme.BG_HOVER)
+        self.fix_plots_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -18544,6 +18549,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             self.fix_titles_btn.configure(state=state)
         if hasattr(self, "fix_genre_btn"):
             self.fix_genre_btn.configure(state=state)
+        if hasattr(self, "fix_plots_btn"):
+            self.fix_plots_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -18985,6 +18992,69 @@ class HarvesterDialog(ctk.CTkToplevel):
                         "Fix Genre Complete",
                         f"Set {len(done.get('renames', []))} file(s) and "
                         f"{len(done.get('tvshows', []))} tvshow.nfo to '{new_genre}'.")
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_plots(self):
+        """Re-fetch real episode plots for already-processed files: match each
+        episode to its playlist and pull the YouTube description into <plot>.
+        Needs the network (and cookies); uses the Match playlist field or each
+        show's saved playlist."""
+        if self._worker and self._worker.is_alive():
+            return
+        if not paragon_harvester.YTDLP_AVAILABLE:
+            messagebox.showwarning("yt-dlp Required",
+                                   "Fixing plots fetches from YouTube and needs yt-dlp:\n\n"
+                                   "    pip install -U yt-dlp", parent=self)
+            return
+        playlist_url = self.match_playlist_entry.get().strip() or None
+        _ck = self.cookies_var.get()
+        cookies_from_browser = None if _ck == "none" else _ck
+        cookies_file = self.cookies_file_entry.get().strip() or None
+        start = self.dest_entry.get().strip() or str(Path.home())
+        folder = filedialog.askdirectory(
+            title="Select folder to re-fetch plots for (recurses into show folders)",
+            initialdir=start, parent=self)
+        if not folder:
+            return
+        count = paragon_harvester.count_extended_videos(folder)
+        if not count:
+            messagebox.showinfo("Fix Plots",
+                                "No processed episodes found under:\n\n" + folder, parent=self)
+            return
+        src = (f"the playlist:\n    {playlist_url}" if playlist_url
+               else "each show's saved playlist")
+        if not messagebox.askyesno(
+                "Fix Plots",
+                f"Match up to {count} episode(s) under:\n{folder}\n\nto {src}, and re-fetch "
+                "their plots from YouTube?\n\nThis uses the network (and your cookie "
+                "settings) and can take a while.",
+                parent=self):
+            return
+        confirm_match_cb = self._make_confirm_match_cb()
+        self._busy(True, monitoring=False)
+        self._set_status("Fetching plots...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            updated = []
+            errored = False
+            try:
+                updated = paragon_harvester.refetch_plots_in_folder(
+                    folder, playlist_url=playlist_url, cookies_file=cookies_file,
+                    cookies_from_browser=cookies_from_browser,
+                    confirm_match_cb=confirm_match_cb)
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR fixing plots: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+                if not errored:
+                    self._notify_complete("Fix Plots Complete",
+                                          f"Updated {len(updated)} episode plot(s).")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 

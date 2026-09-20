@@ -340,20 +340,35 @@ def _norm_for_match(s):
     s = re.sub(r"[^a-z0-9]+", " ", s.lower())
     return " ".join(s.split())
 
+def _tokens_contiguous(ftoks, ttoks):
+    """True if the fragment tokens appear as a contiguous run in the title
+    tokens -- so 'episode 7' matches 'episode 7 full show' but NOT 'episode 17'
+    or 'episode 10' (the number is its own token)."""
+    n = len(ftoks)
+    if not n or n > len(ttoks):
+        return False
+    for i in range(len(ttoks) - n + 1):
+        if ttoks[i:i + n] == ftoks:
+            return True
+    return False
+
 def title_match_score(fragment, title):
-    """0..1 similarity between a filename fragment and a full video title. A
-    fragment fully contained in the title scores high; otherwise fall back to
-    token-overlap / sequence similarity."""
+    """0..1 similarity between a filename fragment and a full video title.
+    A contiguous token run scores highest (so episode numbers disambiguate),
+    then a raw substring, then token-overlap / sequence similarity."""
     f = _norm_for_match(fragment)
     t = _norm_for_match(title)
     if not f or not t:
         return 0.0
+    ftoks, ttoks = f.split(), t.split()
+    if _tokens_contiguous(ftoks, ttoks):
+        return max(0.7, len(ftoks) / len(ttoks))
     if f in t:
         return max(0.6, len(f) / len(t))
     import difflib
     seq = difflib.SequenceMatcher(None, f, t).ratio()
-    ftoks, ttoks = set(f.split()), set(t.split())
-    jac = len(ftoks & ttoks) / len(ftoks | ttoks) if (ftoks | ttoks) else 0.0
+    fset, tset = set(ftoks), set(ttoks)
+    jac = len(fset & tset) / len(fset | tset) if (fset | tset) else 0.0
     return max(seq, jac)
 
 def list_playlist_entries(url, cookies_file=None, cookies_from_browser=None):
@@ -2434,6 +2449,97 @@ def retitle_genre_in_folder(folder, new_genre, apply=False):
         for show in shows_seen:
             _update_saved_genre(show, new_genre)
     return result
+
+def _update_nfo_plot(nfo_path, new_plot):
+    """Replace an episode NFO's <plot> with new_plot (escaped). Returns True if
+    it changed the file (no <plot> tag -> no change)."""
+    try:
+        with open(nfo_path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return False
+    esc = xml_escape(strip_4byte_chars(new_plot or ""))
+    new = re.sub(r'(<plot>).*?(</plot>)',
+                 lambda m: m.group(1) + esc + m.group(2),
+                 data, count=1, flags=re.DOTALL)
+    if new == data:
+        return False
+    try:
+        with open(nfo_path, "w", encoding="utf-8") as f:
+            f.write(new)
+        return True
+    except OSError:
+        return False
+
+def count_extended_videos(folder):
+    """Count extended-format video files under folder (offline, for a preview)."""
+    n = 0
+    if not os.path.isdir(folder):
+        return 0
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if fn.lower().endswith(VIDEO_EXTENSIONS) and parse_extended_name(fn):
+                n += 1
+    return n
+
+def refetch_plots_in_folder(folder, playlist_url=None, cookies_file=None,
+                            cookies_from_browser=None, confirm_match_cb=None):
+    """Re-fetch real episode plots for already-processed files under `folder`.
+
+    For each extended-format video, match its title against the playlist (the
+    per-round `playlist_url` override, else the show's saved playlist), fetch the
+    matched video's YouTube description, and rewrite the episode NFO's <plot>.
+    A match at/above the threshold is auto-accepted; a weaker one is offered to
+    confirm_match_cb. Returns the list of filenames whose plot was updated.
+    """
+    updated = []
+    if not os.path.isdir(folder):
+        log(f"Folder not found: {folder}")
+        return updated
+    saved = list_saved_shows()
+
+    def saved_playlist(show):
+        entry = saved.get((show or "").strip().title()) or {}
+        return entry.get("playlist")
+
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if not fn.lower().endswith(VIDEO_EXTENSIONS):
+                continue
+            parsed = parse_extended_name(fn)
+            if not parsed:
+                continue
+            prefix, title, show, genre, res, ch, codec, ext = parsed
+            effective_playlist = playlist_url or saved_playlist(show)
+            if not effective_playlist:
+                log(f"  No playlist for '{show}' - skipping {fn}")
+                continue
+            entries = list_playlist_entries(effective_playlist, cookies_file, cookies_from_browser)
+            if not entries:
+                continue
+            bid, btitle, score = best_playlist_match(title, entries)
+            if not bid:
+                continue
+            accept = score >= PLAYLIST_MATCH_THRESHOLD
+            if not accept and confirm_match_cb is not None:
+                accept = bool(confirm_match_cb(title, btitle, score))
+            if not accept:
+                log(f"  Skipped (weak match {int(score * 100)}%): {fn}")
+                continue
+            meta = get_youtube_metadata(bid, cookies_file, cookies_from_browser)
+            if not meta:
+                log(f"  No metadata for {fn}")
+                continue
+            desc = meta.get('description', '')
+            if not desc:
+                log(f"  No description on the matched video for {fn}")
+                continue
+            plot = clean_description(desc, title, show)
+            nfo = os.path.join(root, os.path.splitext(fn)[0] + ".nfo")
+            if os.path.isfile(nfo) and _update_nfo_plot(nfo, plot):
+                updated.append(fn)
+                log(f"  Plot updated ({int(score * 100)}% -> '{btitle}'): {fn}")
+    return updated
 
 def reset_show_counter(show_name):
     """Non-interactive episode-counter reset for the GUI.
