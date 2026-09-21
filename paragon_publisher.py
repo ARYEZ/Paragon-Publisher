@@ -546,15 +546,18 @@ THEMES = {
         "SUCCESS": "#44dd88", "ERROR": "#ff4444", "WARNING": "#ffaa00",
         "BORDER_GOLD": "#ff6600", "BORDER_RED": "#8b1500", "BORDER_DARK": "#333333",
     },
+    # Colours taken from the Paragon skin (colors/defaults.xml): brand red
+    # #CE2221 on black, white #F1F1F1, grey #B4B4B4, with the web remote's
+    # orange (#FF6A00) kept for buttons/highlights.
     "Paragon Home": {
-        "BG_DARK": "#0b0b0d", "BG_SECONDARY": "#141417", "BG_TERTIARY": "#1d1a1c",
-        "BG_HOVER": "#2b1a1c",
-        "RED_PRIMARY": "#e01e1e", "RED_LIGHT": "#ff3b30", "RED_DARK": "#a01414",
-        "ORANGE": "#ff5a2a", "GOLD": "#ff6a00", "GOLD_LIGHT": "#ff9248",
-        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#c9bfbf",
-        "TEXT_MUTED": "#8a7f7f", "TEXT_DISABLED": "#5f5757",
-        "SUCCESS": "#3ad07a", "ERROR": "#ff3b30", "WARNING": "#ffb02a",
-        "BORDER_GOLD": "#ff6a00", "BORDER_RED": "#e01e1e", "BORDER_DARK": "#3a2020",
+        "BG_DARK": "#000000", "BG_SECONDARY": "#0c0c0c", "BG_TERTIARY": "#161616",
+        "BG_HOVER": "#241213",
+        "RED_PRIMARY": "#ce2221", "RED_LIGHT": "#f24343", "RED_DARK": "#8a1616",
+        "ORANGE": "#ff5a2a", "GOLD": "#ff6a00", "GOLD_LIGHT": "#ff8a3d",
+        "TEXT_PRIMARY": "#f1f1f1", "TEXT_SECONDARY": "#b4b4b4",
+        "TEXT_MUTED": "#7a7a7a", "TEXT_DISABLED": "#555555",
+        "SUCCESS": "#3ad07a", "ERROR": "#ce2221", "WARNING": "#ffb02a",
+        "BORDER_GOLD": "#ff6a00", "BORDER_RED": "#ce2221", "BORDER_DARK": "#2a1414",
     },
 }
 
