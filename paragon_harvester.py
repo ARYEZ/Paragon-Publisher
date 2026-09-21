@@ -1676,7 +1676,8 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
                              js_runtime_path=None, prefer_h264=True,
                              cookies_file=None, extra_args=None,
                              audio_only=False, audio_format="mp3",
-                             audio_quality="0", playlist_items=None, date_after=None):
+                             audio_quality="0", playlist_items=None, date_after=None,
+                             min_duration=None, max_duration=None):
     """Construct the yt-dlp argument list for one URL. Factored out so it can be
     tested without actually downloading. resolution is a max height as a string
     ('2160'/'1080'/'720') or None for best. container is the merged output
@@ -1762,6 +1763,16 @@ def build_ytdlp_download_cmd(url, source_folder, resolution=None, container="mkv
         cmd += ["--playlist-items", str(playlist_items)]
     if date_after:
         cmd += ["--dateafter", str(date_after)]
+    # Duration gate: skip videos outside the length range BEFORE downloading
+    # (no wasted bandwidth). yt-dlp's --match-filter drops entries whose
+    # duration (seconds) fails the test; unknown-duration entries are skipped.
+    dur_terms = []
+    if min_duration:
+        dur_terms.append(f"duration >= {int(min_duration)}")
+    if max_duration:
+        dur_terms.append(f"duration <= {int(max_duration)}")
+    if dur_terms:
+        cmd += ["--match-filter", " & ".join(dur_terms)]
     # User-supplied extra yt-dlp args (escape hatch for YouTube's shifting
     # requirements, e.g. --extractor-args, PO-token settings). Appended last so
     # they can override earlier defaults.
@@ -1774,7 +1785,8 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                   archive_file=None, should_stop=None, whole_playlist=False,
                   cookies_from_browser=None, prefer_h264=True, cookies_file=None,
                   extra_args=None, audio_only=False, audio_format="mp3",
-                  audio_quality="0", playlist_items=None, date_after=None):
+                  audio_quality="0", playlist_items=None, date_after=None,
+                  min_duration=None, max_duration=None):
     """Download each URL (video, playlist, or channel) into source_folder via
     yt-dlp, streaming output through the logger. Returns (ok_count, fail_count).
     should_stop, if given, is polled to allow cancelling between and during
@@ -1830,7 +1842,9 @@ def download_urls(urls, source_folder, resolution=None, container="mkv",
                                        audio_format=audio_format,
                                        audio_quality=audio_quality,
                                        playlist_items=playlist_items,
-                                       date_after=date_after)
+                                       date_after=date_after,
+                                       min_duration=min_duration,
+                                       max_duration=max_duration)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True,

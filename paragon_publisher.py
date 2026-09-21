@@ -18117,6 +18117,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             cfg["harvester_audio_format"] = self.audio_format_var.get()
             cfg["harvester_audio_bitrate"] = self.audio_bitrate_var.get()
             cfg["harvester_limit"] = self.limit_var.get()
+            cfg["harvester_min_len"] = self.min_len_entry.get().strip()
+            cfg["harvester_max_len"] = self.max_len_entry.get().strip()
             cfg["harvester_skip"] = self.skip_var.get()
             cfg["harvester_repeat"] = self.repeat_entry.get().strip()
             cfg["harvester_ask_each"] = self.ask_each_var.get()
@@ -18271,6 +18273,15 @@ class HarvesterDialog(ctk.CTkToplevel):
         ParagonOptionMenu(opt, values=["All", "Latest 1", "Latest 5", "Latest 10",
                                        "Latest 20", "Past month", "Past year"],
                           variable=self.limit_var, width=120).pack(side="left", padx=(6, 14))
+        ParagonLabel(opt, text="Length", style="muted", anchor="w").pack(side="left")
+        self.min_len_entry = ParagonEntry(opt, width=42)
+        self.min_len_entry.insert(0, str(cfg.get("harvester_min_len", "")))
+        self.min_len_entry.pack(side="left", padx=(6, 2))
+        ParagonLabel(opt, text="–", style="muted").pack(side="left")
+        self.max_len_entry = ParagonEntry(opt, width=42)
+        self.max_len_entry.insert(0, str(cfg.get("harvester_max_len", "")))
+        self.max_len_entry.pack(side="left", padx=(2, 3))
+        ParagonLabel(opt, text="min", style="muted", anchor="w").pack(side="left", padx=(0, 14))
         self.skip_var = ctk.BooleanVar(value=cfg.get("harvester_skip", True))
         ParagonCheckbox(opt, text="Skip already downloaded",
                         variable=self.skip_var).pack(side="left", padx=(0, 14))
@@ -18739,6 +18750,14 @@ class HarvesterDialog(ctk.CTkToplevel):
             "Past year": (None, "today-1year"),
         }
         playlist_items, date_after = _limit_map.get(self.limit_var.get(), (None, None))
+        def _len_secs(entry):
+            txt = entry.get().strip()
+            try:
+                return int(float(txt) * 60) if txt else None
+            except ValueError:
+                return None
+        min_duration = _len_secs(self.min_len_entry)
+        max_duration = _len_secs(self.max_len_entry)
         use_archive = force_archive or self.skip_var.get()
         archive = os.path.join(source, ".paragon_archive.txt") if use_archive else None
         whole_playlist = self.whole_playlist_var.get()
@@ -18782,7 +18801,8 @@ class HarvesterDialog(ctk.CTkToplevel):
                         prefer_h264=prefer_h264, cookies_file=cookies_file,
                         extra_args=extra_args, audio_only=audio_only,
                         audio_format=audio_format, audio_quality=audio_quality,
-                        playlist_items=playlist_items, date_after=date_after)
+                        playlist_items=playlist_items, date_after=date_after,
+                        min_duration=min_duration, max_duration=max_duration)
                     dl_ok += ok; dl_fail += fail
                     if organize and not self._stop_event.is_set():
                         self._set_status("Organizing...")
