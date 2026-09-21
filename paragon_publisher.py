@@ -18387,6 +18387,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                     fg_color=ParagonTheme.BG_TERTIARY,
                                                     hover_color=ParagonTheme.BG_HOVER)
         self.fix_plots_btn.pack(side="left", padx=(10, 0))
+        self.prune_btn = ParagonSecondaryButton(actions, text="✂ PRUNE",
+                                                command=self._prune_duration, width=120, height=40,
+                                                fg_color=ParagonTheme.BG_TERTIARY,
+                                                hover_color=ParagonTheme.BG_HOVER)
+        self.prune_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -18635,6 +18640,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             self.fix_genre_btn.configure(state=state)
         if hasattr(self, "fix_plots_btn"):
             self.fix_plots_btn.configure(state=state)
+        if hasattr(self, "prune_btn"):
+            self.prune_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -19139,6 +19146,157 @@ class HarvesterDialog(ctk.CTkToplevel):
                 if not errored:
                     self._notify_complete("Fix Plots Complete",
                                           f"Updated {len(updated)} episode plot(s).")
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    @staticmethod
+    def _fmt_dur(seconds):
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m {s:02d}s"
+
+    def _prune_duration(self):
+        """Delete episodes whose NFO duration is shorter (or longer) than a
+        threshold -- e.g. drop clips below N minutes from a full-length folder."""
+        if self._worker and self._worker.is_alive():
+            return
+        win = ctk.CTkToplevel(self)
+        win.title("Prune by Duration")
+        win.configure(fg_color=ParagonTheme.BG_DARK)
+        win.transient(self)
+        win.geometry("560x300")
+        win.after(10, win.grab_set)
+
+        ParagonLabel(win, text="Prune episodes by length", style="subheader").pack(
+            anchor="w", padx=20, pady=(20, 4))
+        ParagonLabel(win,
+                     text="Reads <durationinseconds> from each episode NFO and deletes the\n"
+                          "video + NFO for episodes outside the range. Leave a box blank to\n"
+                          "ignore that side. Episodes with no duration in the NFO are skipped.",
+                     style="muted").pack(anchor="w", padx=20, pady=(0, 14))
+
+        row = ctk.CTkFrame(win, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 6))
+        ParagonLabel(row, text="Delete shorter than", style="muted").pack(side="left")
+        shorter = ParagonEntry(row, width=70)
+        shorter.pack(side="left", padx=(8, 4))
+        ParagonLabel(row, text="minutes", style="muted").pack(side="left")
+
+        row2 = ctk.CTkFrame(win, fg_color="transparent")
+        row2.pack(fill="x", padx=20, pady=(0, 16))
+        ParagonLabel(row2, text="…and longer than ", style="muted").pack(side="left")
+        longer = ParagonEntry(row2, width=70)
+        longer.pack(side="left", padx=(8, 4))
+        ParagonLabel(row2, text="minutes  (optional)", style="muted").pack(side="left")
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(0, 16))
+
+        def _close():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            win.destroy()
+
+        def _mins(entry):
+            txt = entry.get().strip()
+            if not txt:
+                return None
+            try:
+                return int(float(txt) * 60)
+            except ValueError:
+                return "bad"
+
+        def _go():
+            min_s = _mins(shorter)
+            max_s = _mins(longer)
+            if min_s == "bad" or max_s == "bad":
+                messagebox.showwarning("Prune", "Enter minutes as a number.", parent=win)
+                return
+            if min_s is None and max_s is None:
+                messagebox.showwarning("Prune", "Enter at least one threshold.", parent=win)
+                return
+            _close()
+            self._prune_scan(min_s, max_s)
+
+        ParagonSecondaryButton(btns, text="CANCEL", width=110, command=_close).pack(side="right")
+        ParagonButton(btns, text="✂ FIND", width=130, command=_go).pack(side="right", padx=(0, 10))
+
+    def _prune_scan(self, min_s, max_s):
+        start = self.dest_entry.get().strip() or str(Path.home())
+        folder = filedialog.askdirectory(
+            title="Select folder to prune (recurses into show folders)",
+            initialdir=start, parent=self)
+        if not folder:
+            return
+        self._busy(True, monitoring=False)
+        self._set_status("Scanning durations...")
+
+        def work():
+            errored = False
+            try:
+                matches, unknown = paragon_harvester.find_episodes_by_duration(
+                    folder, min_seconds=min_s, max_seconds=max_s)
+                self.after(0, lambda: self._prune_confirm(folder, min_s, max_s, matches, unknown))
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR scanning durations: {e}")
+            finally:
+                self._set_status("Idle")
+                if errored and self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _prune_confirm(self, folder, min_s, max_s, matches, unknown):
+        self._busy(False)
+        rng = []
+        if min_s is not None:
+            rng.append(f"shorter than {self._fmt_dur(min_s)}")
+        if max_s is not None:
+            rng.append(f"longer than {self._fmt_dur(max_s)}")
+        crit = " or ".join(rng)
+        if not matches:
+            messagebox.showinfo(
+                "Prune by Duration",
+                f"No episodes {crit} under:\n\n{folder}"
+                + (f"\n\n({unknown} had no duration in their NFO and were skipped.)" if unknown else ""),
+                parent=self)
+            return
+        sample = "\n".join(f"  {self._fmt_dur(dur)}   {fn}" for fn, _, dur in matches[:10])
+        more = f"\n  …and {len(matches) - 10} more." if len(matches) > 10 else ""
+        extra = f"\n\n{unknown} episode(s) had no duration in their NFO and will be left alone." if unknown else ""
+        if not messagebox.askyesno(
+                "Delete episodes?",
+                f"PERMANENTLY DELETE {len(matches)} episode(s) {crit}\n"
+                f"(video + NFO) under:\n{folder}\n\n{sample}{more}{extra}\n\n"
+                "This cannot be undone. Delete them?",
+                icon="warning", parent=self):
+            return
+        paths = [p for _, p, _ in matches]
+        self._busy(True, monitoring=False)
+        self._set_status("Deleting...")
+
+        def work():
+            paragon_harvester.set_logger(self._log)
+            deleted = 0
+            errored = False
+            try:
+                for p in paths:
+                    if paragon_harvester.delete_episode_files(p):
+                        deleted += 1
+                        self._log(f"Deleted: {os.path.basename(p)}")
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR deleting: {e}")
+            finally:
+                paragon_harvester.set_logger(None)
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+                if not errored:
+                    self._notify_complete("Prune Complete",
+                                          f"Deleted {deleted} episode(s).")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 

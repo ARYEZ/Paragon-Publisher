@@ -2482,6 +2482,56 @@ def count_extended_videos(folder):
                 n += 1
     return n
 
+def _nfo_duration_seconds(nfo_path):
+    """Read <durationinseconds> from an episode NFO, or None if absent."""
+    try:
+        with open(nfo_path, "r", encoding="utf-8") as f:
+            data = f.read()
+    except OSError:
+        return None
+    m = re.search(r'<durationinseconds>\s*(\d+)\s*</durationinseconds>', data)
+    return int(m.group(1)) if m else None
+
+def find_episodes_by_duration(folder, min_seconds=None, max_seconds=None):
+    """Find episodes whose NFO duration is below min_seconds or above
+    max_seconds. Returns (matches, unknown) where matches is a sorted list of
+    (basename, video_path, duration_seconds) and unknown is the count of videos
+    whose duration couldn't be read (no NFO / no <durationinseconds>)."""
+    matches = []
+    unknown = 0
+    if not os.path.isdir(folder):
+        return matches, unknown
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if not fn.lower().endswith(VIDEO_EXTENSIONS):
+                continue
+            nfo = os.path.join(root, os.path.splitext(fn)[0] + ".nfo")
+            dur = _nfo_duration_seconds(nfo) if os.path.isfile(nfo) else None
+            if dur is None:
+                unknown += 1
+                continue
+            below = min_seconds is not None and dur < min_seconds
+            above = max_seconds is not None and dur > max_seconds
+            if below or above:
+                matches.append((fn, os.path.join(root, fn), dur))
+    matches.sort(key=lambda x: x[2])
+    return matches, unknown
+
+def delete_episode_files(video_path):
+    """Delete a video and its sidecar .nfo. Returns the list of deleted paths."""
+    deleted = []
+    root = os.path.dirname(video_path)
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    for name in (os.path.basename(video_path), stem + ".nfo"):
+        p = os.path.join(root, name)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+                deleted.append(p)
+        except OSError as e:
+            log(f"  Could not delete {name}: {e}")
+    return deleted
+
 def refetch_plots_in_folder(folder, playlist_url=None, cookies_file=None,
                             cookies_from_browser=None, confirm_match_cb=None):
     """Re-fetch real episode plots for already-processed files under `folder`.
