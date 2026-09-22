@@ -14463,7 +14463,28 @@ class PyRenamerApp(DnDCTk):
         import time
         cls._dir_cache[path] = entries
         cls._cache_timestamps[path] = time.time()
-    
+
+    def _open_maximized(self):
+        """Force the main window to open maximized, like the library screens.
+
+        Window memory may restore a remembered 'normal' geometry on launch, so
+        we re-assert the zoomed state after that restore settles. Falls back to
+        a screen-filling geometry on platforms where 'zoomed' isn't supported.
+        """
+        try:
+            if self.state() == 'zoomed':
+                return
+            self.state('zoomed')
+            return
+        except Exception:
+            pass
+        try:
+            self.geometry(
+                f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0"
+            )
+        except Exception:
+            pass
+
     def __init__(self):
         # Enable mouse wheel scrolling globally BEFORE creating any widgets
         enable_mousewheel_scrolling(None)
@@ -14474,7 +14495,11 @@ class PyRenamerApp(DnDCTk):
         self.title("PYRENAMER — Bulk File Renamer")
         self.geometry("1300x850")
         self.minsize(1000, 700)
-        self.after(10, lambda: self.state('zoomed'))  # Maximize window
+        # Open maximized, like the library screens. Do it AFTER window memory's
+        # restore settles (~140ms) so a remembered 'normal' size can't leave the
+        # main window un-maximized, and re-assert once more as a safety net.
+        self.after(160, self._open_maximized)
+        self.after(450, self._open_maximized)
         
         # Set appearance
         ctk.set_appearance_mode("dark")
