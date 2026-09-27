@@ -14952,11 +14952,25 @@ class PyRenamerApp(DnDCTk):
         ParagonSecondaryButton(preset_frame, text="📂", command=self._load_preset, width=35, height=28).pack(side="left", padx=2)
         ParagonSecondaryButton(preset_frame, text="📋", command=self._manage_presets, width=35, height=28).pack(side="left", padx=2)
         
-        # Tabview for rules (fill the available height so tall tabs like TV
-        # aren't clipped now that the panel can be full screen)
+        # Options section — pinned to the BOTTOM first so it's always fully
+        # visible; the tabview then fills the space above it.
+        options_frame = ParagonFrame(parent)
+        options_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 10))
+
+        ParagonLabel(options_frame, text="OPTIONS", style="header").pack(anchor="w", padx=15, pady=(10, 5))
+
+        # NOTE: renaming never touches the file extension (self.include_extension
+        # stays False), so there is deliberately no "include extension" option.
+        ParagonCheckbox(options_frame, text="Include folders",
+                       variable=self.include_folders).pack(anchor="w", padx=15, pady=3)
+        ParagonCheckbox(options_frame, text="Scan subfolders (recursive)",
+                       variable=self.recursive_scan).pack(anchor="w", padx=15, pady=(3, 10))
+
+        # Tabview for rules — fills the height between the header and OPTIONS so
+        # tall tabs like TV aren't clipped now that the panel can be full screen
         self.rules_tabs = ParagonTabview(parent, height=520)
         self.rules_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 5))
-        
+
         # Create tabs
         self.rules_tabs.add("Replace")
         self.rules_tabs.add("Remove")
@@ -14967,7 +14981,7 @@ class PyRenamerApp(DnDCTk):
         self.rules_tabs.add("Date")
         self.rules_tabs.add("Tags")
         self.rules_tabs.add("Media")
-        
+
         # Populate tabs
         self._create_replace_tab(self.rules_tabs.tab("Replace"))
         self._create_remove_tab(self.rules_tabs.tab("Remove"))
@@ -14978,7 +14992,7 @@ class PyRenamerApp(DnDCTk):
         self._create_datetime_tab(self.rules_tabs.tab("Date"))
         self._create_tags_tab(self.rules_tabs.tab("Tags"))
         self._create_media_tab(self.rules_tabs.tab("Media"))
-        
+
         # Set Media tab as default
         self.rules_tabs.set("Media")
 
@@ -14987,19 +15001,6 @@ class PyRenamerApp(DnDCTk):
             self.rules_tabs._segmented_button.grid_configure(sticky="w")
         except Exception:
             pass
-
-        # Options section
-        options_frame = ParagonFrame(parent)
-        options_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
-        ParagonLabel(options_frame, text="OPTIONS", style="header").pack(anchor="w", padx=15, pady=(10, 5))
-        
-        ParagonCheckbox(options_frame, text="Include extension in rename", 
-                       variable=self.include_extension).pack(anchor="w", padx=15, pady=3)
-        ParagonCheckbox(options_frame, text="Include folders",
-                       variable=self.include_folders).pack(anchor="w", padx=15, pady=3)
-        ParagonCheckbox(options_frame, text="Scan subfolders (recursive)",
-                       variable=self.recursive_scan).pack(anchor="w", padx=15, pady=(3, 10))
     
     def _create_replace_tab(self, parent):
         """Replace rule tab"""
@@ -18008,7 +18009,8 @@ MusicBrainz Album Lookup:
         
         # Options
         if 'options' in state:
-            self.include_extension.set(state['options'].get('include_extension', False))
+            # Extension is never renamed, regardless of what a saved preset holds
+            self.include_extension.set(False)
             self.include_folders.set(state['options'].get('include_folders', False))
     
     def _save_preset(self):
