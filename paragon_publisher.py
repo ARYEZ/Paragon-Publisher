@@ -17394,9 +17394,11 @@ MusicBrainz Album Lookup:
             print(f"Could not open files pop-out: {e}")
 
     def _on_files_popout_closed(self):
-        """Called by the pop-out window when it closes. The main window stays
-        as the rules view; reopen the files window from the library bar."""
+        """Called by the pop-out window when it closes. Empty the queue so the
+        next folder starts fresh; reopen the files window from the library bar."""
         self.files_popout = None
+        # Clear the loaded files so reopening starts with an empty queue
+        self._clear_files()
 
     def _mirror_popout_items(self, items):
         """Push the current preview rows to the pop-out window, if open."""
