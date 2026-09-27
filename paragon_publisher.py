@@ -14831,10 +14831,8 @@ class PyRenamerApp(DnDCTk):
         content = ctk.CTkFrame(inner_container, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=15, pady=(10, 15))
 
-        rules_panel = ParagonFrame(content)
-        rules_panel.pack(fill="both", expand=True)
-        self._create_rules_panel(rules_panel)
-        self.rules_panel = rules_panel
+        # Two separate bordered boxes: RENAME RULES (left) + MEDIA MANAGER (right)
+        self._create_rules_panel(content)
 
         # Build the files panel into a hidden holder so self.file_list (the data
         # model the preview/rename logic drives), drag-and-drop, and the tag
@@ -14973,28 +14971,30 @@ class PyRenamerApp(DnDCTk):
         return sf
 
     def _create_rules_panel(self, parent):
-        """Create the rules configuration panel"""
+        """Create the rules configuration panel as two separate bordered boxes:
+        RENAME RULES (rule tabs) on the left, MEDIA MANAGER on the right."""
+        # =========================== LEFT BOX ===========================
+        left_box = ParagonFrame(parent)
+        left_box.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
         # Header with preset buttons
-        header_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        header_frame = ctk.CTkFrame(left_box, fg_color="transparent")
         header_frame.pack(fill="x", padx=15, pady=(15, 10))
-        
+
         ParagonLabel(header_frame, text="⚙️  RENAME RULES", style="title").pack(side="left")
-        
-        # Preset buttons on the right
+
         preset_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
         preset_frame.pack(side="right")
-        
         ParagonSecondaryButton(preset_frame, text="💾", command=self._save_preset, width=35, height=28).pack(side="left", padx=2)
         ParagonSecondaryButton(preset_frame, text="📂", command=self._load_preset, width=35, height=28).pack(side="left", padx=2)
         ParagonSecondaryButton(preset_frame, text="📋", command=self._manage_presets, width=35, height=28).pack(side="left", padx=2)
-        
-        # Options section — pinned to the BOTTOM first so it's always fully
-        # visible; the tabview then fills the space above it.
-        options_frame = ParagonFrame(parent)
+
+        # Options section — pinned to the BOTTOM of the left box first so it's
+        # always fully visible; the tabview fills the space above it.
+        options_frame = ParagonFrame(left_box)
         options_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 10))
 
         ParagonLabel(options_frame, text="OPTIONS", style="header").pack(anchor="w", padx=15, pady=(10, 5))
-
         # NOTE: renaming never touches the file extension (self.include_extension
         # stays False), so there is deliberately no "include extension" option.
         ParagonCheckbox(options_frame, text="Include folders",
@@ -15002,21 +15002,9 @@ class PyRenamerApp(DnDCTk):
         ParagonCheckbox(options_frame, text="Scan subfolders (recursive)",
                        variable=self.recursive_scan).pack(anchor="w", padx=15, pady=(3, 10))
 
-        # Body: split into the rule tabs (left) and the always-visible Media
-        # Manager (right). The small rule tabs (Replace…Tags) don't need the
-        # whole width, so Media lives permanently in the right half.
-        body = ctk.CTkFrame(parent, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=10, pady=(0, 5))
-
-        left_col = ctk.CTkFrame(body, fg_color="transparent")
-        left_col.pack(side="left", fill="both", expand=True, padx=(0, 8))
-
-        right_col = ctk.CTkFrame(body, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
-        right_col.pack(side="right", fill="both", expand=True)
-
-        # --- Left: rule tabs (Replace … Tags) ---
-        self.rules_tabs = ParagonTabview(left_col, height=520)
-        self.rules_tabs.pack(fill="both", expand=True)
+        # Rule tabs (Replace … Tags) fill the middle of the left box
+        self.rules_tabs = ParagonTabview(left_box, height=520)
+        self.rules_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
         self.rules_tabs.add("Replace")
         self.rules_tabs.add("Remove")
@@ -15046,9 +15034,12 @@ class PyRenamerApp(DnDCTk):
         except Exception:
             pass
 
-        # --- Right: Media Manager, permanently visible (scrollable) ---
-        media_scroll = ctk.CTkScrollableFrame(right_col, fg_color="transparent")
-        media_scroll.pack(fill="both", expand=True, padx=6, pady=6)
+        # =========================== RIGHT BOX ==========================
+        right_box = ParagonFrame(parent)
+        right_box.pack(side="right", fill="both", expand=True, padx=(8, 0))
+
+        media_scroll = ctk.CTkScrollableFrame(right_box, fg_color="transparent")
+        media_scroll.pack(fill="both", expand=True, padx=10, pady=10)
         self._create_media_tab(media_scroll)
     
     def _create_replace_tab(self, parent):
