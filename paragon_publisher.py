@@ -15002,12 +15002,22 @@ class PyRenamerApp(DnDCTk):
         ParagonCheckbox(options_frame, text="Scan subfolders (recursive)",
                        variable=self.recursive_scan).pack(anchor="w", padx=15, pady=(3, 10))
 
-        # Tabview for rules — fills the height between the header and OPTIONS so
-        # tall tabs like TV aren't clipped now that the panel can be full screen
-        self.rules_tabs = ParagonTabview(parent, height=520)
-        self.rules_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+        # Body: split into the rule tabs (left) and the always-visible Media
+        # Manager (right). The small rule tabs (Replace…Tags) don't need the
+        # whole width, so Media lives permanently in the right half.
+        body = ctk.CTkFrame(parent, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
-        # Create tabs
+        left_col = ctk.CTkFrame(body, fg_color="transparent")
+        left_col.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        right_col = ctk.CTkFrame(body, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        right_col.pack(side="right", fill="both", expand=True)
+
+        # --- Left: rule tabs (Replace … Tags) ---
+        self.rules_tabs = ParagonTabview(left_col, height=520)
+        self.rules_tabs.pack(fill="both", expand=True)
+
         self.rules_tabs.add("Replace")
         self.rules_tabs.add("Remove")
         self.rules_tabs.add("Insert")
@@ -15016,11 +15026,9 @@ class PyRenamerApp(DnDCTk):
         self.rules_tabs.add("TV")
         self.rules_tabs.add("Date")
         self.rules_tabs.add("Tags")
-        self.rules_tabs.add("Media")
 
-        # Populate tabs — each tab's content lives in a scrollable frame so a
-        # tall tab (Media library buttons, TV help text) is never clipped, no
-        # matter the window size or whether the files list is popped out.
+        # Each tab's content lives in a scrollable frame so a tall tab (e.g. TV)
+        # is never clipped regardless of window size.
         self._create_replace_tab(self._scrollable_tab("Replace"))
         self._create_remove_tab(self._scrollable_tab("Remove"))
         self._create_insert_tab(self._scrollable_tab("Insert"))
@@ -15029,16 +15037,19 @@ class PyRenamerApp(DnDCTk):
         self._create_tv_tab(self._scrollable_tab("TV"))
         self._create_datetime_tab(self._scrollable_tab("Date"))
         self._create_tags_tab(self._scrollable_tab("Tags"))
-        self._create_media_tab(self._scrollable_tab("Media"))
 
-        # Set Media tab as default
-        self.rules_tabs.set("Media")
+        self.rules_tabs.set("Replace")
 
         # Keep the tab bar left-aligned after all tabs are added
         try:
             self.rules_tabs._segmented_button.grid_configure(sticky="w")
         except Exception:
             pass
+
+        # --- Right: Media Manager, permanently visible (scrollable) ---
+        media_scroll = ctk.CTkScrollableFrame(right_col, fg_color="transparent")
+        media_scroll.pack(fill="both", expand=True, padx=6, pady=6)
+        self._create_media_tab(media_scroll)
     
     def _create_replace_tab(self, parent):
         """Replace rule tab"""
