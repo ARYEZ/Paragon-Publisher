@@ -14826,11 +14826,16 @@ class PyRenamerApp(DnDCTk):
         left_panel.pack(side="left", fill="both", expand=False, padx=(0, 10))
         left_panel.configure(width=420)
         self._create_rules_panel(left_panel)
-        
+
         # Right panel - Files
         right_panel = ParagonFrame(content)
         right_panel.pack(side="right", fill="both", expand=True)
         self._create_file_panel(right_panel)
+
+        # Keep references so the layout can switch between the split view and a
+        # rules-only view when the FILES list pops out to its own window.
+        self.rules_panel = left_panel
+        self.files_panel = right_panel
         
         # Bottom decorative lines
         self._create_decorative_lines(inner_container, bottom=True)
@@ -17349,6 +17354,7 @@ MusicBrainz Album Lookup:
 
         try:
             self.files_popout = FilesPopoutWindow(self)
+            self._set_files_popped_layout(True)
         except Exception as e:
             self.files_popout = None
             print(f"Could not open files pop-out: {e}")
@@ -17356,6 +17362,30 @@ MusicBrainz Album Lookup:
     def _on_files_popout_closed(self):
         """Called by the pop-out window when it closes."""
         self.files_popout = None
+        # Fall back to the embedded split view so files stay visible
+        self._set_files_popped_layout(False)
+
+    def _set_files_popped_layout(self, popped: bool):
+        """Give the rules panel the full width when files are popped out, or
+        restore the split (rules + embedded files) view when they're not."""
+        try:
+            if not hasattr(self, "rules_panel") or not hasattr(self, "files_panel"):
+                return
+            if popped:
+                # Hide the embedded files panel; let rules fill the whole area
+                self.files_panel.pack_forget()
+                self.rules_panel.pack_configure(side="left", fill="both",
+                                                expand=True, padx=(0, 0))
+            else:
+                # Restore the fixed-width rules column + embedded files panel
+                self.rules_panel.pack_configure(side="left", fill="both",
+                                                expand=False, padx=(0, 10))
+                self.rules_panel.configure(width=420)
+                self.files_panel.pack(side="right", fill="both", expand=True)
+                # Make sure the embedded list reflects the current preview
+                self._update_preview()
+        except Exception as e:
+            print(f"Layout switch failed: {e}")
 
     def _mirror_popout_items(self, items):
         """Push the current preview rows to the pop-out window, if open."""
