@@ -720,6 +720,20 @@ class InsertRule(RenameRule):
         return filename[:pos] + self.text + filename[pos:]
 
 
+def smart_title_case(text: str) -> str:
+    """Title-case that does NOT capitalize the letter after an apostrophe.
+
+    Python's str.title() turns "it's" into "It'S" and "here's" into "Here'S".
+    This keeps contractions/possessives intact ("It's", "Here's") while still
+    capitalizing the first letter of each word and lower-casing the rest.
+    """
+    return re.sub(
+        r"[A-Za-z]+(?:'[A-Za-z]+)*",
+        lambda m: m.group(0)[0].upper() + m.group(0)[1:].lower(),
+        text,
+    )
+
+
 @dataclass
 class CaseRule(RenameRule):
     """Change case of filename"""
@@ -735,7 +749,7 @@ class CaseRule(RenameRule):
         elif self.case_type == "upper":
             return filename.upper()
         elif self.case_type == "title":
-            return filename.title()
+            return smart_title_case(filename)
         elif self.case_type == "sentence":
             return filename.capitalize()
         elif self.case_type == "swap":
