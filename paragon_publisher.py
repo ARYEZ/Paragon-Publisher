@@ -3413,6 +3413,12 @@ class ParagonTabview(ctk.CTkTabview):
         super().__init__(master, **defaults)
         # Set tab font after init
         self._segmented_button.configure(font=ctk.CTkFont(family="Segoe UI", size=16))
+        # Left-align the tab bar instead of centering it (looks cleaner when
+        # the panel is wide / full screen)
+        try:
+            self._segmented_button.grid_configure(sticky="w")
+        except Exception:
+            pass
 
 
 class ParagonProgressBar(ctk.CTkProgressBar):
@@ -14946,9 +14952,10 @@ class PyRenamerApp(DnDCTk):
         ParagonSecondaryButton(preset_frame, text="📂", command=self._load_preset, width=35, height=28).pack(side="left", padx=2)
         ParagonSecondaryButton(preset_frame, text="📋", command=self._manage_presets, width=35, height=28).pack(side="left", padx=2)
         
-        # Tabview for rules
-        self.rules_tabs = ParagonTabview(parent, height=460)
-        self.rules_tabs.pack(fill="x", padx=10, pady=(0, 5))
+        # Tabview for rules (fill the available height so tall tabs like TV
+        # aren't clipped now that the panel can be full screen)
+        self.rules_tabs = ParagonTabview(parent, height=520)
+        self.rules_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 5))
         
         # Create tabs
         self.rules_tabs.add("Replace")
@@ -14974,7 +14981,13 @@ class PyRenamerApp(DnDCTk):
         
         # Set Media tab as default
         self.rules_tabs.set("Media")
-        
+
+        # Keep the tab bar left-aligned after all tabs are added
+        try:
+            self.rules_tabs._segmented_button.grid_configure(sticky="w")
+        except Exception:
+            pass
+
         # Options section
         options_frame = ParagonFrame(parent)
         options_frame.pack(fill="x", padx=10, pady=(0, 10))
@@ -14991,10 +15004,10 @@ class PyRenamerApp(DnDCTk):
     def _create_replace_tab(self, parent):
         """Replace rule tab"""
         ParagonLabel(parent, text="Find:", style="muted").pack(anchor="w", padx=10, pady=(15, 5))
-        ParagonEntry(parent, textvariable=self.replace_find, placeholder_text="Text to find...", width=350).pack(padx=10)
-        
+        ParagonEntry(parent, textvariable=self.replace_find, placeholder_text="Text to find...", width=350).pack(anchor="w", padx=10)
+
         ParagonLabel(parent, text="Replace with:", style="muted").pack(anchor="w", padx=10, pady=(15, 5))
-        ParagonEntry(parent, textvariable=self.replace_with, placeholder_text="Replacement text...", width=350).pack(padx=10)
+        ParagonEntry(parent, textvariable=self.replace_with, placeholder_text="Replacement text...", width=350).pack(anchor="w", padx=10)
         
         ParagonCheckbox(parent, text="Use Regular Expressions", variable=self.replace_regex).pack(anchor="w", padx=10, pady=(15, 5))
         ParagonCheckbox(parent, text="Case Sensitive", variable=self.replace_case).pack(anchor="w", padx=10, pady=5)
@@ -15038,7 +15051,7 @@ class PyRenamerApp(DnDCTk):
     def _create_insert_tab(self, parent):
         """Insert rule tab"""
         ParagonLabel(parent, text="Text to insert:", style="muted").pack(anchor="w", padx=10, pady=(15, 5))
-        ParagonEntry(parent, textvariable=self.insert_text, placeholder_text="Text to insert...", width=350).pack(padx=10)
+        ParagonEntry(parent, textvariable=self.insert_text, placeholder_text="Text to insert...", width=350).pack(anchor="w", padx=10)
         
         pos_frame = ctk.CTkFrame(parent, fg_color="transparent")
         pos_frame.pack(fill="x", padx=10, pady=(15, 5))
@@ -15188,7 +15201,7 @@ class PyRenamerApp(DnDCTk):
         ParagonCheckbox(parent, text="Rename by metadata", variable=self.metadata_enabled).pack(anchor="w", padx=10, pady=(15, 10))
         
         ParagonLabel(parent, text="Template:", style="muted").pack(anchor="w", padx=10, pady=(10, 5))
-        ParagonEntry(parent, textvariable=self.metadata_template, placeholder_text="{artist} - {title}", width=350).pack(padx=10)
+        ParagonEntry(parent, textvariable=self.metadata_template, placeholder_text="{artist} - {title}", width=350).pack(anchor="w", padx=10)
         
         # Help
         help_frame = ctk.CTkFrame(parent, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6)
