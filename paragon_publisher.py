@@ -14936,6 +14936,14 @@ class PyRenamerApp(DnDCTk):
         ParagonSecondaryButton(right_frame, text="↩️  UNDO", command=self._undo, width=90).pack(side="left", padx=(0, 10))
         ParagonGoldButton(right_frame, text="✨  RENAME ALL", command=self._execute_rename, width=160).pack(side="left")
     
+    def _scrollable_tab(self, name):
+        """Return a scrollable frame inside the named rules tab so tall tab
+        content (e.g. the Media library buttons) is never clipped."""
+        tab = self.rules_tabs.tab(name)
+        sf = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        sf.pack(fill="both", expand=True)
+        return sf
+
     def _create_rules_panel(self, parent):
         """Create the rules configuration panel"""
         # Header with preset buttons
@@ -14982,16 +14990,18 @@ class PyRenamerApp(DnDCTk):
         self.rules_tabs.add("Tags")
         self.rules_tabs.add("Media")
 
-        # Populate tabs
-        self._create_replace_tab(self.rules_tabs.tab("Replace"))
-        self._create_remove_tab(self.rules_tabs.tab("Remove"))
-        self._create_insert_tab(self.rules_tabs.tab("Insert"))
-        self._create_case_tab(self.rules_tabs.tab("Case"))
-        self._create_number_tab(self.rules_tabs.tab("Number"))
-        self._create_tv_tab(self.rules_tabs.tab("TV"))
-        self._create_datetime_tab(self.rules_tabs.tab("Date"))
-        self._create_tags_tab(self.rules_tabs.tab("Tags"))
-        self._create_media_tab(self.rules_tabs.tab("Media"))
+        # Populate tabs — each tab's content lives in a scrollable frame so a
+        # tall tab (Media library buttons, TV help text) is never clipped, no
+        # matter the window size or whether the files list is popped out.
+        self._create_replace_tab(self._scrollable_tab("Replace"))
+        self._create_remove_tab(self._scrollable_tab("Remove"))
+        self._create_insert_tab(self._scrollable_tab("Insert"))
+        self._create_case_tab(self._scrollable_tab("Case"))
+        self._create_number_tab(self._scrollable_tab("Number"))
+        self._create_tv_tab(self._scrollable_tab("TV"))
+        self._create_datetime_tab(self._scrollable_tab("Date"))
+        self._create_tags_tab(self._scrollable_tab("Tags"))
+        self._create_media_tab(self._scrollable_tab("Media"))
 
         # Set Media tab as default
         self.rules_tabs.set("Media")
