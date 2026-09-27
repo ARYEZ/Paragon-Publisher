@@ -14823,26 +14823,27 @@ class PyRenamerApp(DnDCTk):
         # Toolbar
         self._create_toolbar(inner_container)
         
-        # Main content area
+        # Permanent library / navigation bar
+        self._create_library_bar(inner_container)
+
+        # Main content area — the RENAME RULES panel fills the whole width.
+        # The FILES list lives in its own full-screen pop-out window.
         content = ctk.CTkFrame(inner_container, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=15, pady=(10, 15))
-        
-        # Left panel - Rules
-        left_panel = ParagonFrame(content)
-        left_panel.pack(side="left", fill="both", expand=False, padx=(0, 10))
-        left_panel.configure(width=420)
-        self._create_rules_panel(left_panel)
 
-        # Right panel - Files
-        right_panel = ParagonFrame(content)
-        right_panel.pack(side="right", fill="both", expand=True)
-        self._create_file_panel(right_panel)
+        rules_panel = ParagonFrame(content)
+        rules_panel.pack(fill="both", expand=True)
+        self._create_rules_panel(rules_panel)
+        self.rules_panel = rules_panel
 
-        # Keep references so the layout can switch between the split view and a
-        # rules-only view when the FILES list pops out to its own window.
-        self.rules_panel = left_panel
-        self.files_panel = right_panel
-        
+        # Build the files panel into a hidden holder so self.file_list (the data
+        # model the preview/rename logic drives), drag-and-drop, and the tag
+        # editor stay alive; the visible files view is the full-screen pop-out
+        # window, which auto-opens when files are loaded.
+        self._files_holder = ctk.CTkFrame(self, fg_color="transparent")
+        self._create_file_panel(self._files_holder)
+        self.files_panel = self._files_holder
+
         # Bottom decorative lines
         self._create_decorative_lines(inner_container, bottom=True)
         
@@ -14935,7 +14936,34 @@ class PyRenamerApp(DnDCTk):
         
         ParagonSecondaryButton(right_frame, text="↩️  UNDO", command=self._undo, width=90).pack(side="left", padx=(0, 10))
         ParagonGoldButton(right_frame, text="✨  RENAME ALL", command=self._execute_rename, width=160).pack(side="left")
-    
+
+    def _create_library_bar(self, parent):
+        """Permanent navigation bar with the library browsers + harvester.
+
+        These used to live at the bottom of the Media tab where they got
+        clipped; they're now always visible here.
+        """
+        bar = ParagonFrame(parent)
+        bar.pack(fill="x", padx=20, pady=(0, 8))
+
+        inner = ctk.CTkFrame(bar, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=8)
+
+        ParagonButton(inner, text="🎬  MOVIE LIBRARY", command=self._open_movie_library,
+                      width=175).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="📚  TV LIBRARY", command=self._open_tv_library,
+                      width=150).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="🎵  MUSIC LIBRARY", command=self._open_music_library,
+                      width=175).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="📁  FILE LIBRARY", command=self._open_file_library,
+                      width=155).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="🌾  HARVESTER", command=self._open_harvester,
+                      width=160).pack(side="left", padx=(0, 8))
+
+        # Reopen the full-screen FILES window (it also auto-opens on load)
+        ParagonSecondaryButton(inner, text="⛶  FILES WINDOW", command=self._open_files_popout,
+                               width=160).pack(side="right")
+
     def _scrollable_tab(self, name):
         """Return a scrollable frame inside the named rules tab so tall tab
         content (e.g. the Media library buttons) is never clipped."""
@@ -15435,45 +15463,10 @@ MusicBrainz Album Lookup:
             music_library_inner, text="FOLDERS", width=90,
             command=self._manage_music_folders
         ).pack(side="left")
-        
-        # Main buttons - Library browsers
-        btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=10)
-        
-        ParagonButton(
-            btn_frame,
-            text="🎬 MOVIE LIBRARY",
-            command=self._open_movie_library,
-            width=170
-        ).pack(side="left", padx=(0, 10))
-        
-        ParagonButton(
-            btn_frame,
-            text="📚 TV LIBRARY",
-            command=self._open_tv_library,
-            width=150
-        ).pack(side="left", padx=(0, 10))
-        
-        ParagonButton(
-            btn_frame,
-            text="🎵 MUSIC LIBRARY",
-            command=self._open_music_library,
-            width=170
-        ).pack(side="left", padx=(0, 10))
-        
-        ParagonButton(
-            btn_frame,
-            text="📁 FILE LIBRARY",
-            command=self._open_file_library,
-            width=150
-        ).pack(side="left", padx=(0, 10))
 
-        ParagonButton(
-            btn_frame,
-            text="🌾 HARVESTER",
-            command=self._open_harvester,
-            width=160
-        ).pack(side="left")
+        # NOTE: the MOVIE/TV/MUSIC/FILE LIBRARY and HARVESTER buttons used to
+        # live here; they're now in the permanent library bar (_create_library_bar)
+        # so they're always visible instead of being buried/clipped in this tab.
 
         _dbg("DEBUG: _create_media_tab END")
     
@@ -17378,38 +17371,14 @@ MusicBrainz Album Lookup:
 
         try:
             self.files_popout = FilesPopoutWindow(self)
-            self._set_files_popped_layout(True)
         except Exception as e:
             self.files_popout = None
             print(f"Could not open files pop-out: {e}")
 
     def _on_files_popout_closed(self):
-        """Called by the pop-out window when it closes."""
+        """Called by the pop-out window when it closes. The main window stays
+        as the rules view; reopen the files window from the library bar."""
         self.files_popout = None
-        # Fall back to the embedded split view so files stay visible
-        self._set_files_popped_layout(False)
-
-    def _set_files_popped_layout(self, popped: bool):
-        """Give the rules panel the full width when files are popped out, or
-        restore the split (rules + embedded files) view when they're not."""
-        try:
-            if not hasattr(self, "rules_panel") or not hasattr(self, "files_panel"):
-                return
-            if popped:
-                # Hide the embedded files panel; let rules fill the whole area
-                self.files_panel.pack_forget()
-                self.rules_panel.pack_configure(side="left", fill="both",
-                                                expand=True, padx=(0, 0))
-            else:
-                # Restore the fixed-width rules column + embedded files panel
-                self.rules_panel.pack_configure(side="left", fill="both",
-                                                expand=False, padx=(0, 10))
-                self.rules_panel.configure(width=420)
-                self.files_panel.pack(side="right", fill="both", expand=True)
-                # Make sure the embedded list reflects the current preview
-                self._update_preview()
-        except Exception as e:
-            print(f"Layout switch failed: {e}")
 
     def _mirror_popout_items(self, items):
         """Push the current preview rows to the pop-out window, if open."""
