@@ -191,10 +191,23 @@ def _collapse_delimiter(text):
         return text
     return ' '.join(re.sub(r'\s+-\s+', ' ', text).split())
 
+def smart_title_case(text):
+    """Title-case that does NOT capitalize the letter after an apostrophe.
+
+    Python's str.title() turns "it's" into "It'S" and "here's" into "Here'S".
+    This keeps contractions/possessives intact ("It's", "Here's", "I'm") while
+    still capitalizing the first letter of each word and lower-casing the rest.
+    """
+    return re.sub(
+        r"[A-Za-z]+(?:'[A-Za-z]+)*",
+        lambda m: m.group(0)[0].upper() + m.group(0)[1:].lower(),
+        text or "",
+    )
+
 def clean_title(title):
     # Show/title text for NFOs and folders: ASCII-fold, drop emoji and stray
     # hashtags, title-case, and keep it scan-safe.
-    cleaned = strip_hashes(strip_emoji(normalize_fullwidth(title or ""))).strip().title()
+    cleaned = smart_title_case(strip_hashes(strip_emoji(normalize_fullwidth(title or ""))).strip())
     return strip_4byte_chars(cleaned)
 
 def extract_video_id(filename):
