@@ -4242,9 +4242,137 @@ class FileListWidget(ctk.CTkFrame):
     
     def get_count(self) -> int:
         return len(self.items)
-    
+
     def get_changed_count(self) -> int:
         return sum(1 for item in self.items if item['changed'])
+
+
+class FilesPopoutWindow(ctk.CTkToplevel):
+    """Large, maximized pop-out view of the main FILES list.
+
+    Mirrors the app's current preview (ORIGINAL -> NEW -> STATUS) in a
+    full-screen window, like the library screens, so big batches are easy to
+    review before renaming. Filter/sort/rename controls drive the same app
+    state as the main window, so both views stay in sync.
+    """
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+
+        self.title("PYRENAMER — Files")
+        self.geometry("1400x850")
+        self.configure(fg_color=ParagonTheme.BG_DARK)
+        # Maximize like the library screens, re-asserting once the window
+        # manager settles so it reliably opens full screen.
+        self.after(10, self._maximize)
+        self.after(220, self._maximize)
+
+        self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._close)
+
+        # Initial fill from whatever the app currently shows
+        try:
+            self.set_items(getattr(app, "_last_preview_items", []))
+            self.set_count(app.file_count_label.cget("text"))
+        except Exception:
+            pass
+
+    def _maximize(self):
+        try:
+            if self.state() != 'zoomed':
+                self.state('zoomed')
+            return
+        except Exception:
+            pass
+        try:
+            self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+        except Exception:
+            pass
+
+    def _build_ui(self):
+        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
+        main.pack(fill="both", expand=True)
+
+        # Header
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=72)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        header_inner = ctk.CTkFrame(header, fg_color="transparent")
+        header_inner.pack(fill="both", expand=True, padx=20, pady=12)
+
+        ctk.CTkLabel(header_inner, text="📄 FILES",
+                     font=ctk.CTkFont(family="Bebas Neue", size=40),
+                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
+        self.count_label = ParagonLabel(header_inner, text="", style="muted")
+        self.count_label.pack(side="left", padx=16)
+
+        ParagonGoldButton(header_inner, text="✨  RENAME ALL",
+                          command=self._rename_all, width=170, height=42).pack(side="right")
+        ParagonSecondaryButton(header_inner, text="✕ CLOSE",
+                               command=self._close, width=110, height=42).pack(side="right", padx=(0, 10))
+
+        # Filter + sort bar
+        bar = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=6)
+        bar.pack(fill="x", padx=15, pady=(12, 6))
+
+        ParagonLabel(bar, text="🔍", style="muted").pack(side="left", padx=(12, 6), pady=8)
+        self.filter_entry = ParagonEntry(bar, textvariable=self.app.filter_text,
+                                         placeholder_text="Filter by extension (e.g., .mkv) or name...",
+                                         width=320)
+        self.filter_entry.pack(side="left", padx=5, pady=8)
+
+        for label, extensions in [("All", ""), ("Video", ".mkv,.mp4,.avi,.mov"),
+                                  ("Audio", ".mp3,.flac,.wav,.m4a"), ("Images", ".jpg,.png,.gif,.webp")]:
+            ctk.CTkButton(bar, text=label, width=64, height=30,
+                          fg_color=ParagonTheme.BG_TERTIARY, hover_color=ParagonTheme.BG_HOVER,
+                          text_color=ParagonTheme.TEXT_SECONDARY,
+                          font=ctk.CTkFont(family="Segoe UI", size=11), corner_radius=4,
+                          command=lambda e=extensions: self.app._set_filter(e)).pack(side="left", padx=2)
+
+        for label, sort_key in [("Name ↕", "name"), ("Date ↕", "date"),
+                                ("Size ↕", "size"), ("Ext ↕", "extension")]:
+            ctk.CTkButton(bar, text=label, width=70, height=30,
+                          fg_color=ParagonTheme.BG_TERTIARY, hover_color=ParagonTheme.BG_HOVER,
+                          text_color=ParagonTheme.TEXT_SECONDARY,
+                          font=ctk.CTkFont(family="Segoe UI", size=11), corner_radius=4,
+                          command=lambda k=sort_key: self.app._sort_files(k)).pack(side="right", padx=2, pady=8)
+        ParagonLabel(bar, text="Sort:", style="muted").pack(side="right", padx=(12, 4))
+
+        # Big file list
+        list_container = ctk.CTkFrame(main, fg_color="transparent")
+        list_container.pack(fill="both", expand=True, padx=12, pady=(6, 12))
+        self.list = FileListWidget(list_container)
+        self.list.pack(fill="both", expand=True)
+
+    def set_items(self, items):
+        try:
+            if self.list.winfo_exists():
+                self.list.set_items(list(items))
+        except Exception:
+            pass
+
+    def set_count(self, text):
+        try:
+            self.count_label.configure(text=text)
+        except Exception:
+            pass
+
+    def _rename_all(self):
+        try:
+            self.app._execute_rename()
+        except Exception:
+            pass
+
+    def _close(self):
+        try:
+            self.app._on_files_popout_closed()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
 
 # =============================================================================
@@ -14518,7 +14646,11 @@ class PyRenamerApp(DnDCTk):
         self.rename_history: List[dict] = []  # Track rename operations for log export
         self.sort_key: str = "name"  # Current sort key
         self.sort_reverse: bool = False  # Sort direction
-        
+
+        # Pop-out FILES window (opens full screen when the list is populated)
+        self.files_popout = None
+        self._last_preview_items: List[tuple] = []
+
         # Rule variables
         self._init_rule_variables()
         
@@ -15884,9 +16016,25 @@ MusicBrainz Album Lookup:
         header_frame.pack(fill="x", padx=15, pady=(15, 5))
         
         ParagonLabel(header_frame, text="📄  FILES", style="title").pack(side="left")
+
+        # Pop-out button: open the file list in a full-screen window
+        self.files_popout_btn = ctk.CTkButton(
+            header_frame,
+            text="⛶ POP OUT",
+            width=100,
+            height=30,
+            fg_color=ParagonTheme.BG_TERTIARY,
+            hover_color=ParagonTheme.BG_HOVER,
+            text_color=ParagonTheme.GOLD,
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=4,
+            command=self._open_files_popout
+        )
+        self.files_popout_btn.pack(side="left", padx=(15, 0))
+
         self.file_count_label = ParagonLabel(header_frame, text="0 files", style="muted")
         self.file_count_label.pack(side="right")
-        
+
         # DnD indicator
         if HAS_DND:
             dnd_label = ParagonLabel(header_frame, text="📥 Drop files here", style="muted")
@@ -16939,14 +17087,18 @@ MusicBrainz Album Lookup:
             if any(f.path == path for f in self.files):
                 continue
             self.files.append(FileItem(path))
-        
+
         self._update_preview()
         self._update_file_count()
-    
+        # Pop the file list out to a full-screen window once it's populated
+        self._maybe_open_files_popout()
+
     def _clear_files(self):
         """Clear all files"""
         self.files.clear()
         self.file_list.clear()
+        self._last_preview_items = []
+        self._mirror_popout_items([])
         self._update_file_count()
         self.status_label.configure(text="Ready")
     
@@ -16976,7 +17128,14 @@ MusicBrainz Album Lookup:
             self.file_count_label.configure(text=status_text, text_color=ParagonTheme.WARNING)
         else:
             self.file_count_label.configure(text=status_text, text_color=ParagonTheme.TEXT_SECONDARY)
-    
+
+        # Keep the pop-out window's count label in sync
+        try:
+            if self.files_popout is not None and self.files_popout.winfo_exists():
+                self.files_popout.set_count(status_text)
+        except Exception:
+            self.files_popout = None
+
     # =========================================================================
     # RULE BUILDING & PREVIEW
     # =========================================================================
@@ -17169,8 +17328,54 @@ MusicBrainz Album Lookup:
         
         # Update all at once (uses in-place update if count unchanged)
         self.file_list.set_items(items)
+        self._last_preview_items = items
+        self._mirror_popout_items(items)
         self._update_file_count()
-    
+
+    # =========================================================================
+    # FILES POP-OUT WINDOW
+    # =========================================================================
+
+    def _open_files_popout(self):
+        """Open (or focus) the full-screen pop-out view of the file list."""
+        try:
+            if self.files_popout is not None and self.files_popout.winfo_exists():
+                self.files_popout.deiconify()
+                self.files_popout.lift()
+                self.files_popout.focus_force()
+                return
+        except Exception:
+            self.files_popout = None
+
+        try:
+            self.files_popout = FilesPopoutWindow(self)
+        except Exception as e:
+            self.files_popout = None
+            print(f"Could not open files pop-out: {e}")
+
+    def _on_files_popout_closed(self):
+        """Called by the pop-out window when it closes."""
+        self.files_popout = None
+
+    def _mirror_popout_items(self, items):
+        """Push the current preview rows to the pop-out window, if open."""
+        try:
+            if self.files_popout is not None and self.files_popout.winfo_exists():
+                self.files_popout.set_items(items)
+        except Exception:
+            self.files_popout = None
+
+    def _maybe_open_files_popout(self):
+        """Auto-open the pop-out when the list gets populated with files."""
+        if not self.files:
+            return
+        try:
+            if self.files_popout is not None and self.files_popout.winfo_exists():
+                return
+        except Exception:
+            self.files_popout = None
+        self._open_files_popout()
+
     # =========================================================================
     # RENAME EXECUTION
     # =========================================================================
