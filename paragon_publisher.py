@@ -15122,9 +15122,10 @@ class PyRenamerApp(DnDCTk):
         # Separator
         ctk.CTkFrame(parent, fg_color=ParagonTheme.BORDER_DARK, height=1).pack(fill="x", padx=10, pady=15)
         
-        # Swap segments option
-        ParagonLabel(parent, text="Swap Segments:", style="muted").pack(anchor="w", padx=10, pady=(0, 5))
-        
+        # Swap segments option (extra top pad so the box below the label sits
+        # below the scroll fold instead of peeking through)
+        ParagonLabel(parent, text="Swap Segments:", style="muted").pack(anchor="w", padx=10, pady=(22, 5))
+
         swap_frame = ctk.CTkFrame(parent, fg_color="transparent")
         swap_frame.pack(fill="x", padx=10, pady=5)
         
@@ -15201,8 +15202,9 @@ class PyRenamerApp(DnDCTk):
         ParagonLabel(sep_frame, text="Separator:", style="muted").pack(side="left")
         ParagonEntry(sep_frame, textvariable=self.tv_separator, width=80).pack(side="left", padx=10)
         
-        # Position
-        ParagonLabel(parent, text="Position:", style="muted").pack(anchor="w", padx=10, pady=(10, 5))
+        # Position (extra top pad so its top sits below the scroll fold instead
+        # of peeking through — appears cleanly when you scroll)
+        ParagonLabel(parent, text="Position:", style="muted").pack(anchor="w", padx=10, pady=(30, 5))
         ParagonOptionMenu(parent, variable=self.tv_position,
                          values=["prefix", "suffix", "replace"],
                          command=lambda v: self._schedule_preview_update(), width=200).pack(anchor="w", padx=10)
