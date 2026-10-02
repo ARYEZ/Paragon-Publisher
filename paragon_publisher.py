@@ -2484,7 +2484,169 @@ class NFOGenerator:
             pass
 
         return info if info['video'] else None
-    
+
+    # --- Movie library maintenance: fill in missing stream details / taglines ---
+
+    _VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv',
+                   '.ts', '.m2ts', '.webm', '.mpg', '.mpeg')
+
+    @staticmethod
+    def _streamdetails_block(fileinfo: Dict) -> str:
+        """Build the <fileinfo><streamdetails>…</streamdetails></fileinfo> XML."""
+        lines = ['  <fileinfo>', '    <streamdetails>']
+        video = fileinfo.get('video', {})
+        if video:
+            lines += ['      <video>',
+                      f'        <codec>{video.get("codec", "")}</codec>',
+                      f'        <aspect>{video.get("aspect", "")}</aspect>',
+                      f'        <width>{video.get("width", 0)}</width>',
+                      f'        <height>{video.get("height", 0)}</height>',
+                      f'        <durationinseconds>{video.get("duration", 0)}</durationinseconds>',
+                      '      </video>']
+        for audio in fileinfo.get('audio', []):
+            lines += ['      <audio>',
+                      f'        <codec>{audio.get("codec", "")}</codec>',
+                      f'        <language>{audio.get("language", "")}</language>',
+                      f'        <channels>{audio.get("channels", 2)}</channels>',
+                      '      </audio>']
+        for sub in fileinfo.get('subtitles', []):
+            lines += ['      <subtitle>',
+                      f'        <language>{sub.get("language", "")}</language>',
+                      '      </subtitle>']
+        lines += ['    </streamdetails>', '  </fileinfo>']
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _find_movie_video(nfo_path: str) -> Optional[str]:
+        """Find the video file a movie NFO belongs to (same basename first,
+        otherwise any video in the same folder)."""
+        folder = os.path.dirname(nfo_path)
+        base = os.path.splitext(os.path.basename(nfo_path))[0]
+        for ext in NFOGenerator._VIDEO_EXTS:
+            cand = os.path.join(folder, base + ext)
+            if os.path.isfile(cand):
+                return cand
+        try:
+            vids = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                          if os.path.splitext(f)[1].lower() in NFOGenerator._VIDEO_EXTS)
+        except Exception:
+            vids = []
+        return vids[0] if vids else None
+
+    @staticmethod
+    def scan_movie_nfos(folder: str) -> Dict:
+        """Scan a folder (recursively) for movie NFOs missing stream details or
+        a tagline. Returns {'streams': [paths], 'taglines': [paths]}."""
+        result = {'streams': [], 'taglines': []}
+        for root, _dirs, files in os.walk(folder):
+            for fn in files:
+                if not fn.lower().endswith('.nfo'):
+                    continue
+                path = os.path.join(root, fn)
+                try:
+                    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                except Exception:
+                    continue
+                if '<movie>' not in content.lower():
+                    continue
+                if '<streamdetails>' not in content.lower():
+                    result['streams'].append(path)
+                m = re.search(r'<tagline>(.*?)</tagline>', content, re.DOTALL | re.IGNORECASE)
+                if not (m and m.group(1).strip()):
+                    result['taglines'].append(path)
+        return result
+
+    @staticmethod
+    def apply_movie_nfo_fixes(folder: str, fix_streams: bool = True,
+                              fix_taglines: bool = True, log=None) -> Dict:
+        """Fill in missing stream details (via ffprobe) and taglines (via TMDB,
+        keyed on the NFO's <tmdbid>) for movie NFOs under folder. Returns
+        {'streams': [fixed], 'taglines': [fixed], 'skipped': [(path, reason)]}."""
+        def _log(msg):
+            if log:
+                try:
+                    log(msg)
+                except Exception:
+                    pass
+
+        scan = NFOGenerator.scan_movie_nfos(folder)
+        done = {'streams': [], 'taglines': [], 'skipped': []}
+
+        if fix_streams:
+            for nfo in scan['streams']:
+                video = NFOGenerator._find_movie_video(nfo)
+                if not video:
+                    done['skipped'].append((nfo, 'no video file found'))
+                    _log(f"Skip stream details (no video): {os.path.basename(nfo)}")
+                    continue
+                info = NFOGenerator.probe_stream_fileinfo(video)
+                if not info:
+                    done['skipped'].append((nfo, 'ffprobe unavailable/failed'))
+                    _log(f"Skip stream details (ffprobe failed): {os.path.basename(video)}")
+                    continue
+                try:
+                    with open(nfo, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                    if '<streamdetails>' in content.lower():
+                        continue
+                    idx = content.rfind('</movie>')
+                    if idx == -1:
+                        continue
+                    block = NFOGenerator._streamdetails_block(info)
+                    content = content[:idx] + block + '\n' + content[idx:]
+                    with open(nfo, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    done['streams'].append(nfo)
+                    _log(f"Added stream details: {os.path.basename(nfo)}")
+                except Exception as e:
+                    done['skipped'].append((nfo, f'write error: {e}'))
+
+        if fix_taglines:
+            for nfo in scan['taglines']:
+                try:
+                    with open(nfo, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                except Exception:
+                    continue
+                m = re.search(r'<tmdbid>(\d+)</tmdbid>', content, re.IGNORECASE)
+                if not m:
+                    done['skipped'].append((nfo, 'no tmdbid for tagline lookup'))
+                    _log(f"Skip tagline (no tmdbid): {os.path.basename(nfo)}")
+                    continue
+                details = None
+                try:
+                    details = TMDBAPI.get_movie_details(int(m.group(1)))
+                except Exception as e:
+                    _log(f"TMDB error for {os.path.basename(nfo)}: {e}")
+                tagline = ((details or {}).get('tagline') or '').strip()
+                if not tagline:
+                    done['skipped'].append((nfo, 'no tagline available from TMDB'))
+                    _log(f"Skip tagline (none on TMDB): {os.path.basename(nfo)}")
+                    continue
+                esc = NFOGenerator._escape_xml(tagline)
+                repl = f'<tagline>{esc}</tagline>'
+                try:
+                    if re.search(r'<tagline\s*/>', content, re.IGNORECASE) or \
+                       re.search(r'<tagline>\s*</tagline>', content, re.IGNORECASE):
+                        content = re.sub(r'<tagline\s*/>|<tagline>\s*</tagline>',
+                                         lambda _m: repl, content, count=1, flags=re.IGNORECASE)
+                    elif '</plot>' in content:
+                        content = content.replace('</plot>', '</plot>\n  ' + repl, 1)
+                    else:
+                        idx = content.rfind('</movie>')
+                        if idx == -1:
+                            continue
+                        content = content[:idx] + '  ' + repl + '\n' + content[idx:]
+                    with open(nfo, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    done['taglines'].append(nfo)
+                    _log(f"Added tagline: {os.path.basename(nfo)}")
+                except Exception as e:
+                    done['skipped'].append((nfo, f'write error: {e}'))
+
+        return done
+
     @staticmethod
     def generate_tvshow_nfo(show_data: Dict) -> str:
         """Generate TV show NFO XML"""
@@ -18769,6 +18931,11 @@ class HarvesterDialog(ctk.CTkToplevel):
                                                 fg_color=ParagonTheme.BG_TERTIARY,
                                                 hover_color=ParagonTheme.BG_HOVER)
         self.prune_btn.pack(side="left", padx=(10, 0))
+        self.fix_movies_btn = ParagonSecondaryButton(actions, text="🎞 FIX MOVIES",
+                                                     command=self._fix_movies, width=150, height=40,
+                                                     fg_color=ParagonTheme.BG_TERTIARY,
+                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.fix_movies_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
 
@@ -19019,6 +19186,8 @@ class HarvesterDialog(ctk.CTkToplevel):
             self.fix_plots_btn.configure(state=state)
         if hasattr(self, "prune_btn"):
             self.prune_btn.configure(state=state)
+        if hasattr(self, "fix_movies_btn"):
+            self.fix_movies_btn.configure(state=state)
         self.stop_btn.configure(state="normal" if busy else "disabled")
         self.monitor_btn.configure(
             text="⏹ STOP MONITOR" if monitoring else "👁 MONITOR",
@@ -19469,6 +19638,93 @@ class HarvesterDialog(ctk.CTkToplevel):
                         "Fix Genre Complete",
                         f"Set {len(done.get('renames', []))} file(s) and "
                         f"{len(done.get('tvshows', []))} tvshow.nfo to '{new_genre}'.")
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_movies(self):
+        """Scan a movie library folder for movie NFOs missing <streamdetails>
+        or a <tagline> and fill them in (ffprobe for stream details, TMDB for
+        taglines). Previews first, then asks before applying."""
+        if self._worker and self._worker.is_alive():
+            return
+        start = self.dest_entry.get().strip() or str(Path.home())
+        folder = filedialog.askdirectory(
+            title="Select movie library folder to scan (recurses into movie folders)",
+            initialdir=start, parent=self)
+        if not folder:
+            return
+        self._busy(True, monitoring=False)
+        self._set_status("Scanning movie NFOs...")
+
+        def work():
+            errored = False
+            try:
+                scan = NFOGenerator.scan_movie_nfos(folder)
+                self.after(0, lambda: self._fix_movies_confirm(folder, scan))
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR scanning movie NFOs: {e}")
+            finally:
+                self._set_status("Idle")
+                if errored and self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _fix_movies_confirm(self, folder, scan):
+        self._busy(False)
+        streams = scan.get("streams", [])
+        taglines = scan.get("taglines", [])
+        if not streams and not taglines:
+            messagebox.showinfo(
+                "Fix Movies",
+                "Every movie NFO under:\n\n" + folder +
+                "\n\nalready has stream details and a tagline.",
+                parent=self)
+            return
+        has_key = bool(TMDBAPI.get_api_key())
+        lines = []
+        if streams:
+            lines.append(f"{len(streams)} movie NFO(s) missing stream details "
+                         "(read from the video via ffprobe):")
+            lines += [f"  {os.path.basename(p)}" for p in streams[:5]]
+            if len(streams) > 5:
+                lines.append(f"  …and {len(streams) - 5} more.")
+        if taglines:
+            lines.append(f"\n{len(taglines)} movie NFO(s) missing a tagline"
+                         + (" (fetched from TMDB):" if has_key else ":"))
+            lines += [f"  {os.path.basename(p)}" for p in taglines[:5]]
+            if len(taglines) > 5:
+                lines.append(f"  …and {len(taglines) - 5} more.")
+            if not has_key:
+                lines.append("\n⚠ No TMDB API key set — taglines will be skipped. "
+                             "Set it in the Media tab to fetch them.")
+        if not messagebox.askyesno(
+                "Fix Movies", "\n".join(lines) + "\n\nProceed?", parent=self):
+            return
+        fix_taglines = bool(taglines) and has_key
+        self._busy(True, monitoring=False)
+        self._set_status("Fixing movie NFOs...")
+
+        def work():
+            done = {"streams": [], "taglines": [], "skipped": []}
+            errored = False
+            try:
+                done = NFOGenerator.apply_movie_nfo_fixes(
+                    folder, fix_streams=bool(streams),
+                    fix_taglines=fix_taglines, log=self._log)
+            except Exception as e:
+                errored = True
+                self._log(f"ERROR fixing movie NFOs: {e}")
+            finally:
+                self._set_status("Idle")
+                if self.winfo_exists():
+                    self.after(0, lambda: self._busy(False))
+                if not errored:
+                    self._notify_complete(
+                        "Fix Movies Complete",
+                        f"Added stream details to {len(done.get('streams', []))} NFO(s) and "
+                        f"taglines to {len(done.get('taglines', []))} NFO(s).")
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
 
