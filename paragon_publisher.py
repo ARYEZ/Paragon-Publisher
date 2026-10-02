@@ -2393,9 +2393,97 @@ class NFOGenerator:
         # Studios
         for studio in movie_data.get('production_companies', []):
             nfo.append(f'  <studio>{NFOGenerator._escape_xml(studio)}</studio>')
-        
+
+        # Stream details (if available) — same shape as episode NFOs
+        if movie_data.get('fileinfo'):
+            nfo.append('  <fileinfo>')
+            nfo.append('    <streamdetails>')
+
+            video = movie_data['fileinfo'].get('video', {})
+            if video:
+                nfo.append('      <video>')
+                nfo.append(f'        <codec>{video.get("codec", "")}</codec>')
+                nfo.append(f'        <aspect>{video.get("aspect", "")}</aspect>')
+                nfo.append(f'        <width>{video.get("width", 0)}</width>')
+                nfo.append(f'        <height>{video.get("height", 0)}</height>')
+                nfo.append(f'        <durationinseconds>{video.get("duration", 0)}</durationinseconds>')
+                nfo.append('      </video>')
+
+            for audio in movie_data['fileinfo'].get('audio', []):
+                nfo.append('      <audio>')
+                nfo.append(f'        <codec>{audio.get("codec", "")}</codec>')
+                nfo.append(f'        <language>{audio.get("language", "")}</language>')
+                nfo.append(f'        <channels>{audio.get("channels", 2)}</channels>')
+                nfo.append('      </audio>')
+
+            for sub in movie_data['fileinfo'].get('subtitles', []):
+                nfo.append('      <subtitle>')
+                nfo.append(f'        <language>{sub.get("language", "")}</language>')
+                nfo.append('      </subtitle>')
+
+            nfo.append('    </streamdetails>')
+            nfo.append('  </fileinfo>')
+
         nfo.append('</movie>')
         return '\n'.join(nfo)
+
+    @staticmethod
+    def probe_stream_fileinfo(video_path: str) -> Optional[Dict]:
+        """Run ffprobe on a video file and return stream info shaped for the
+        <fileinfo><streamdetails> NFO block (video width/height/codec/aspect/
+        durationinseconds, audio codec/language/channels, subtitle language).
+        Returns None if ffprobe is unavailable or no video stream is found."""
+        if not video_path or not os.path.isfile(video_path):
+            return None
+        try:
+            import subprocess
+            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                   '-show_streams', '-show_format', video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=15)
+            if result.returncode != 0:
+                return None
+            data = json.loads(result.stdout)
+        except FileNotFoundError:
+            print("ffprobe not found - movie stream info will not be written")
+            return None
+        except Exception as e:
+            print(f"Could not probe stream info: {e}")
+            return None
+
+        info = {'video': {}, 'audio': [], 'subtitles': []}
+        for stream in data.get('streams', []):
+            ctype = stream.get('codec_type')
+            if ctype == 'video' and not info['video']:
+                w = stream.get('width', 0) or 0
+                h = stream.get('height', 0) or 0
+                aspect = str(round(w / h, 3)) if h else ''
+                info['video'] = {
+                    'codec': (stream.get('codec_name', '') or '').upper(),
+                    'aspect': aspect,
+                    'width': w,
+                    'height': h,
+                    'duration': 0,
+                }
+            elif ctype == 'audio':
+                info['audio'].append({
+                    'codec': (stream.get('codec_name', '') or '').upper(),
+                    'language': stream.get('tags', {}).get('language', 'und'),
+                    'channels': stream.get('channels', 2),
+                })
+            elif ctype == 'subtitle':
+                info['subtitles'].append({
+                    'language': stream.get('tags', {}).get('language', 'und'),
+                })
+
+        try:
+            dur = float(data.get('format', {}).get('duration', 0) or 0)
+            if dur and info['video']:
+                info['video']['duration'] = int(dur)
+        except (TypeError, ValueError):
+            pass
+
+        return info if info['video'] else None
     
     @staticmethod
     def generate_tvshow_nfo(show_data: Dict) -> str:
@@ -7039,6 +7127,8 @@ class MovieScraperDialog(ctk.CTkToplevel):
                 
                 # Create NFO
                 if self.create_nfo.get():
+                    # Probe this file's actual stream info for <streamdetails>
+                    self.movie_details['fileinfo'] = NFOGenerator.probe_stream_fileinfo(filepath)
                     nfo_content = NFOGenerator.generate_movie_nfo(self.movie_details)
                     nfo_path = os.path.join(folder, f"{name}.nfo")
                     with open(nfo_path, 'w', encoding='utf-8') as f:
@@ -8756,6 +8846,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
                 name, ext = os.path.splitext(basename)
                 
                 if self.create_nfo.get():
+                    # Probe this file's actual stream info for <streamdetails>
+                    self.movie_details['fileinfo'] = NFOGenerator.probe_stream_fileinfo(filepath)
                     nfo_content = NFOGenerator.generate_movie_nfo(self.movie_details)
                     with open(os.path.join(folder, f"{name}.nfo"), 'w', encoding='utf-8') as f:
                         f.write(nfo_content)
