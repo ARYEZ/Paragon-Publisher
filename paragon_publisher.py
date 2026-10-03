@@ -3536,6 +3536,7 @@ class ParagonButton(tk.Canvas):
         self._set_colors(kwargs.pop('fg_color', None), kwargs.pop('text_color', None))
         self._hover = False
         self._photo = None
+        self._text_photo = None
         try:
             self._apply_cursor()
         except Exception:
@@ -3581,22 +3582,44 @@ class ParagonButton(tk.Canvas):
             if w < 4 or h < 4:
                 return
             if self._gradient:
-                c1, c2 = (_lighten(self._c1, 1.18), _lighten(self._c2, 1.18)) \
-                    if self._hover else (self._c1, self._c2)
-                border, gloss = "#ff8a3d", True
+                # White button with red→orange gradient TEXT
+                bg = make_gradient_photo(w, h, left_hex="#f6f6f6", right_hex="#f6f6f6",
+                                         radius=self._corner, gloss=False, border_hex="#ff6a00")
+                if bg is not None:
+                    self._photo = bg
+                    self.create_image(0, 0, image=bg, anchor="nw")
+                else:
+                    self.create_rectangle(1, 1, w - 1, h - 1, fill="#f6f6f6", outline="#ff6a00")
+                txt = _strip_button_emoji(self._text)
+                if self._state == "disabled":
+                    self.create_text(w // 2, h // 2, text=txt,
+                                     fill=ParagonTheme.TEXT_DISABLED, font=self._font)
+                else:
+                    if self._hover:
+                        l, r = _lighten("#d81d45", 1.08), _lighten(ParagonTheme.GOLD, 1.06)
+                    else:
+                        l, r = "#d81d45", ParagonTheme.GOLD
+                    fpx = max(12, min(int(h * 0.46), 30))
+                    tph = make_gradient_text_photo(txt, fpx, l, r)
+                    if tph is not None:
+                        self._text_photo = tph
+                        self.create_image(w // 2, h // 2, image=tph, anchor="center")
+                    else:
+                        self.create_text(w // 2, h // 2, text=txt, fill="#d81d45", font=self._font)
             else:
+                # Flat fill (dark "secondary-styled" buttons)
                 base = (self._hover_color or _lighten(self._c1, 1.2)) if self._hover else self._c1
-                c1 = c2 = base
-                border, gloss = self._border_color, False
-            photo = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
-                                        radius=self._corner, gloss=gloss, border_hex=border)
-            if photo is not None:
-                self._photo = photo
-                self.create_image(0, 0, image=photo, anchor="nw")
-            else:
-                self.create_rectangle(1, 1, w - 1, h - 1, fill=self._c1, outline=border or "")
-            fill = ParagonTheme.TEXT_DISABLED if self._state == "disabled" else self._text_color
-            self.create_text(w // 2, h // 2, text=self._text, fill=fill, font=self._font)
+                photo = make_gradient_photo(w, h, left_hex=base, right_hex=base,
+                                            radius=self._corner, gloss=False,
+                                            border_hex=self._border_color)
+                if photo is not None:
+                    self._photo = photo
+                    self.create_image(0, 0, image=photo, anchor="nw")
+                else:
+                    self.create_rectangle(1, 1, w - 1, h - 1, fill=self._c1,
+                                          outline=self._border_color or "")
+                fill = ParagonTheme.TEXT_DISABLED if self._state == "disabled" else self._text_color
+                self.create_text(w // 2, h // 2, text=self._text, fill=fill, font=self._font)
         except Exception:
             pass
 
@@ -10004,16 +10027,118 @@ def make_paragon_gradient(width, height, **kw):
         return None
 
 
+_PHOTO_CACHE = {}
+_GRADIENT_TEXT_CACHE = {}
+_BUTTON_FONT_CACHE = {}
+# Strip emoji / pictographs / arrows / variation selectors from button labels
+# (gradient text can't paint colour emoji).
+_EMOJI_STRIP_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF"
+    "\uFE00-\uFE0F\u2122\u2139\u2328\u23CF\u23E9-\u23FA\u24C2]")
+
+
 def make_gradient_photo(width, height, **kw):
-    """Tk PhotoImage version of the Paragon gradient (for tk.Canvas)."""
+    """Tk PhotoImage version of the Paragon gradient (for tk.Canvas), cached."""
+    width = max(2, int(width))
+    height = max(2, int(height))
+    key = (width, height) + tuple(sorted(kw.items()))
+    cached = _PHOTO_CACHE.get(key)
+    if cached is not None:
+        return cached
     img = _build_gradient_pil(width, height, **kw)
     if img is None:
         return None
     try:
         from PIL import ImageTk
-        return ImageTk.PhotoImage(img)
+        photo = ImageTk.PhotoImage(img)
+        _PHOTO_CACHE[key] = photo
+        return photo
     except Exception as e:
         print(f"Gradient photo failed: {e}")
+        return None
+
+
+def _strip_button_emoji(text):
+    return re.sub(r"\s{2,}", " ", _EMOJI_STRIP_RE.sub("", text or "")).strip()
+
+
+def _load_button_font(px):
+    px = max(8, int(px))
+    f = _BUTTON_FONT_CACHE.get(px)
+    if f is not None:
+        return f
+    try:
+        from PIL import ImageFont
+    except Exception:
+        return None
+    candidates = [
+        "BebasNeue-Regular.ttf", "BebasNeue Regular.ttf", "Bebas Neue.ttf",
+        "BebasNeue.ttf", "bebasneue.ttf",
+        "C:/Windows/Fonts/BebasNeue-Regular.ttf", "C:/Windows/Fonts/BebasNeue.ttf",
+        "C:/Windows/Fonts/Bebas Neue.ttf",
+        # bold system fallbacks so it never fails to load
+        "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/segoeuib.ttf",
+        "arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf",
+    ]
+    font = None
+    for c in candidates:
+        try:
+            font = ImageFont.truetype(c, px)
+            break
+        except Exception:
+            continue
+    if font is None:
+        try:
+            font = ImageFont.load_default(px)
+        except Exception:
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = None
+    _BUTTON_FONT_CACHE[px] = font
+    return font
+
+
+def make_gradient_text_photo(text, font_px, left_hex="#d81d45", right_hex=None):
+    """Render text filled with a horizontal red→orange gradient as a Tk
+    PhotoImage (transparent background). Cached. Returns None on failure."""
+    if not HAS_PIL or not text:
+        return None
+    right_hex = right_hex or ParagonTheme.GOLD
+    key = (text, int(font_px), left_hex, right_hex)
+    cached = _GRADIENT_TEXT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        from PIL import Image as _I, ImageDraw as _D, ImageTk
+        font = _load_button_font(font_px)
+        if font is None:
+            return None
+        tmp = _D.Draw(_I.new("RGBA", (4, 4)))
+        bb = tmp.textbbox((0, 0), text, font=font)
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        if tw <= 0 or th <= 0:
+            return None
+        pad = 4
+        W, H = tw + pad * 2, th + pad * 2
+        lr, lg, lb = _hex_rgb(left_hex)
+        rr, rg, rb = _hex_rgb(right_hex)
+        grad = _I.new("RGB", (W, 1))
+        for x in range(W):
+            t = x / (W - 1)
+            grad.putpixel((x, 0), (int(lr + (rr - lr) * t),
+                                   int(lg + (rg - lg) * t),
+                                   int(lb + (rb - lb) * t)))
+        grad = grad.resize((W, H))
+        mask = _I.new("L", (W, H), 0)
+        _D.Draw(mask).text((pad - bb[0], pad - bb[1]), text, font=font, fill=255)
+        out = _I.new("RGBA", (W, H), (0, 0, 0, 0))
+        out.paste(grad, (0, 0), mask)
+        photo = ImageTk.PhotoImage(out)
+        _GRADIENT_TEXT_CACHE[key] = photo
+        return photo
+    except Exception as e:
+        print(f"Gradient text failed: {e}")
         return None
 
 
