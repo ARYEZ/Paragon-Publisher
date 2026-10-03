@@ -12980,7 +12980,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         # Search results (for show mode)
         self.results_container = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        self.results_container.pack(fill="both", expand=True)
+        self.results_container.pack(fill="both", expand=True, padx=4, pady=(0, 4))
         
         ParagonLabel(self.results_container, text="SEARCH RESULTS", style="header").pack(anchor="w", padx=10, pady=(0, 5))
         self.results_list = ctk.CTkScrollableFrame(self.results_container, fg_color=ParagonTheme.BG_DARK)
@@ -13052,7 +13052,7 @@ class TVEditorDialog(ctk.CTkToplevel):
             self.episode_mode_btn.configure(fg_color=ParagonTheme.BG_TERTIARY)
             
             self.episodes_container.pack_forget()
-            self.results_container.pack(fill="both", expand=True)
+            self.results_container.pack(fill="both", expand=True, padx=4, pady=(0, 4))
             
             self.episode_tabs.pack_forget()
             self.show_tabs.pack(fill="both", expand=True)
@@ -13061,7 +13061,7 @@ class TVEditorDialog(ctk.CTkToplevel):
             self.episode_mode_btn.configure(fg_color=ParagonTheme.RED_PRIMARY)
             
             self.results_container.pack_forget()
-            self.episodes_container.pack(fill="both", expand=True)
+            self.episodes_container.pack(fill="both", expand=True, padx=4, pady=(0, 4))
             self._populate_episodes_list()
             
             self.show_tabs.pack_forget()
