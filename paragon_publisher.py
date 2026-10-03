@@ -9802,27 +9802,22 @@ def _hex_rgb(h):
 _GRADIENT_CACHE = {}
 
 
-def make_paragon_gradient(width, height, left_hex=None, right_hex=None,
-                          radius=8, border_hex=None, gloss=True):
-    """Return a CTkImage of a horizontal red→orange Paragon gradient with
-    rounded corners (and an optional border/top gloss), like the Kodi focus bar.
-    Returns None if Pillow isn't available."""
+def _build_gradient_pil(width, height, left_hex=None, right_hex=None,
+                        radius=8, border_hex=None, gloss=True):
+    """Build a horizontal red→orange Paragon gradient as an RGBA PIL image with
+    rounded corners (and an optional border/top gloss). Returns None if Pillow
+    isn't available."""
     if not HAS_PIL:
         return None
-    left_hex = left_hex or "#d81d45"      # bright pink-red (sampled from skin)
+    left_hex = left_hex or "#d81d45"            # bright pink-red (from skin)
     right_hex = right_hex or ParagonTheme.GOLD  # orange
     border_hex = border_hex or "#ff8a3d"
     width = max(2, int(width))
     height = max(2, int(height))
-    key = (width, height, left_hex, right_hex, radius, border_hex, gloss)
-    cached = _GRADIENT_CACHE.get(key)
-    if cached is not None:
-        return cached
     try:
         from PIL import Image as _Image, ImageDraw as _ImageDraw
         lr, lg, lb = _hex_rgb(left_hex)
         rr, rg, rb = _hex_rgb(right_hex)
-        # Horizontal gradient: build one row, then stretch vertically.
         row = _Image.new("RGB", (width, 1))
         rpx = row.load()
         for x in range(width):
@@ -9832,7 +9827,6 @@ def make_paragon_gradient(width, height, left_hex=None, right_hex=None,
                          int(lb + (rb - lb) * t))
         img = row.resize((width, height)).convert("RGBA")
         if gloss:
-            # Faint top highlight for a glassy look
             gloss_layer = _Image.new("RGBA", (width, height), (0, 0, 0, 0))
             gd = _ImageDraw.Draw(gloss_layer)
             gh = max(1, height // 2)
@@ -9840,7 +9834,6 @@ def make_paragon_gradient(width, height, left_hex=None, right_hex=None,
                 a = int(70 * (1 - y / gh))
                 gd.line([(0, y), (width, y)], fill=(255, 255, 255, a))
             img = _Image.alpha_composite(img, gloss_layer)
-        # Rounded-corner mask
         mask = _Image.new("L", (width, height), 0)
         _ImageDraw.Draw(mask).rounded_rectangle(
             [0, 0, width - 1, height - 1], radius=radius, fill=255)
@@ -9849,11 +9842,33 @@ def make_paragon_gradient(width, height, left_hex=None, right_hex=None,
             _ImageDraw.Draw(img).rounded_rectangle(
                 [0, 0, width - 1, height - 1], radius=radius,
                 outline=_hex_rgb(border_hex) + (255,), width=2)
-        cimg = ctk.CTkImage(light_image=img, dark_image=img, size=(width, height))
-        _GRADIENT_CACHE[key] = cimg
-        return cimg
+        return img
     except Exception as e:
         print(f"Gradient generation failed: {e}")
+        return None
+
+
+def make_paragon_gradient(width, height, **kw):
+    """CTkImage version of the Paragon gradient (for CTk widgets)."""
+    img = _build_gradient_pil(width, height, **kw)
+    if img is None:
+        return None
+    try:
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+    except Exception:
+        return None
+
+
+def make_gradient_photo(width, height, **kw):
+    """Tk PhotoImage version of the Paragon gradient (for tk.Canvas)."""
+    img = _build_gradient_pil(width, height, **kw)
+    if img is None:
+        return None
+    try:
+        from PIL import ImageTk
+        return ImageTk.PhotoImage(img)
+    except Exception as e:
+        print(f"Gradient photo failed: {e}")
         return None
 
 
@@ -10136,65 +10151,72 @@ class TVLibraryDialog(ctk.CTkToplevel):
             self._add_show_item(show)
     
     def _add_show_item(self, show):
-        """Create a show entry - simple button approach"""
+        """Create a show entry as a Canvas 'card': name/year on the left, an
+        episode-count + status badge on the right, and a red→orange gradient
+        background when selected (Kodi-skin style)."""
         year_str = f" ({show['year']})" if show.get('year') else ""
-        
-        # Status indicators as text
         nfo = "✓" if show['has_nfo'] else "✗"
         p = "P" if show['has_poster'] else "-"
         f = "F" if show['has_fanart'] else "-"
         l = "L" if show['has_logo'] else "-"
-        
-        btn_text = f"{show['name']}{year_str}  •  {show['episode_count']} ep  [{nfo}{p}{f}{l}]"
-        
-        btn = ctk.CTkButton(
-            self.show_list,
-            text=btn_text,
-            anchor="w",
-            fg_color=ParagonTheme.BG_TERTIARY,
-            hover_color=ParagonTheme.BG_HOVER,
-            font=ctk.CTkFont(family="Bebas Neue", size=22),
-            height=48,
-            corner_radius=8,
-            command=lambda s=show: self._on_show_click(s)
-        )
-        btn.pack(fill="x", pady=2)
-        self.show_widgets[show['path']] = btn
 
-    def _select_row_gradient(self, btn):
-        """Give a row the red→orange gradient highlight (falls back to flat red
-        if Pillow can't build the texture)."""
+        row = tk.Canvas(self.show_list, height=50, highlightthickness=0, bd=0,
+                        bg=ParagonTheme.BG_DARK)
+        row.pack(fill="x", pady=2)
+        row._show = show
+        row._year = year_str
+        row._flags = f"[{nfo}{p}{f}{l}]"
+        row._selected = False
+        row._photo = None          # keep a ref so the PhotoImage isn't GC'd
+        row.bind("<Button-1>", lambda e, s=show: self._on_show_click(s))
+        # Redraw whenever the row gets/changes its width (incl. first layout)
+        row.bind("<Configure>", lambda e, r=row: self._draw_show_row(r))
+        self.show_widgets[show['path']] = row
+
+    def _draw_show_row(self, row):
+        """(Re)paint a show row-card for its current selected state + width."""
         try:
-            w = btn.winfo_width()
-            if w < 10:
-                w = 360  # not laid out yet; use a sensible default
-            grad = make_paragon_gradient(w, 46, radius=8)
-            if grad is not None:
-                btn._grad_img = grad  # keep a ref so it isn't garbage-collected
-                btn.configure(image=grad, fg_color="transparent", compound="center")
+            show = row._show
+            row.delete("all")
+            w = row.winfo_width() or 360
+            h = 50
+            if row._selected:
+                photo = make_gradient_photo(max(2, w - 4), h - 6, radius=8)
+                if photo is not None:
+                    row._photo = photo
+                    row.create_image(2, 3, image=photo, anchor="nw")
+                else:
+                    row.create_rectangle(2, 3, w - 2, h - 3,
+                                         fill=ParagonTheme.RED_PRIMARY, outline="")
+                name_fill = "#ffffff"
+                badge_fill = "#ffffff"
             else:
-                btn.configure(fg_color=ParagonTheme.RED_PRIMARY)
-        except Exception:
-            try:
-                btn.configure(fg_color=ParagonTheme.RED_PRIMARY)
-            except Exception:
-                pass
-
-    def _deselect_row(self, btn):
-        try:
-            btn._grad_img = None
-            btn.configure(image=None, fg_color=ParagonTheme.BG_TERTIARY)
+                row._photo = None
+                row.create_rectangle(2, 3, w - 2, h - 3,
+                                     fill=ParagonTheme.BG_TERTIARY,
+                                     outline=ParagonTheme.BORDER_DARK)
+                name_fill = ParagonTheme.TEXT_PRIMARY
+                badge_fill = ParagonTheme.TEXT_MUTED
+            row.create_text(16, h // 2, text=f"{show['name']}{row._year}",
+                            anchor="w", fill=name_fill, font=("Bebas Neue", 16))
+            row.create_text(w - 16, h // 2,
+                            text=f"{show['episode_count']} EP    {row._flags}",
+                            anchor="e", fill=badge_fill, font=("Bebas Neue", 14))
         except Exception:
             pass
 
     def _on_show_click(self, show):
         # Update selection highlighting
         prev = getattr(self, '_prev_selected', None)
-        if prev and prev in self.show_widgets:
-            self._deselect_row(self.show_widgets[prev])
+        if prev and prev in self.show_widgets and prev != show['path']:
+            pr = self.show_widgets[prev]
+            pr._selected = False
+            self._draw_show_row(pr)
 
         if show['path'] in self.show_widgets:
-            self._select_row_gradient(self.show_widgets[show['path']])
+            cr = self.show_widgets[show['path']]
+            cr._selected = True
+            self._draw_show_row(cr)
 
         self._prev_selected = show['path']
         
