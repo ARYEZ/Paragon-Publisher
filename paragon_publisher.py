@@ -3535,6 +3535,7 @@ class ParagonButton(tk.Canvas):
         self._font = self._as_font(kwargs.pop('font', None))
         self._set_colors(kwargs.pop('fg_color', None), kwargs.pop('text_color', None))
         self._hover = False
+        self._selected = False
         self._photo = None
         self._text_photo = None
         try:
@@ -3583,8 +3584,9 @@ class ParagonButton(tk.Canvas):
             if w < 4 or h < 4:
                 return
             if self._gradient:
-                # Red→orange gradient background: darker by default, normal on hover
-                if self._hover:
+                # Red→orange gradient background: darker by default, normal on
+                # hover or when forced "selected" (e.g. the active tab).
+                if self._hover or self._selected:
                     c1, c2 = "#d81d45", ParagonTheme.GOLD
                 else:
                     c1, c2 = _lighten("#d81d45", 0.62), _lighten(ParagonTheme.GOLD, 0.62)
@@ -3631,6 +3633,12 @@ class ParagonButton(tk.Canvas):
 
     def _on_leave(self, _):
         self._hover = False
+        self._draw()
+
+    def set_selected(self, value):
+        """Force the bright gradient on (True) or off (False), independent of
+        hover. Used to mark the active tab."""
+        self._selected = bool(value)
         self._draw()
 
     # --- CTk-compatible shims so existing .configure()/.cget() calls still work ---
@@ -3835,7 +3843,7 @@ class ParagonOptionMenu(tk.Canvas):
                              bg=ParagonTheme.BG_TERTIARY, fg=ParagonTheme.TEXT_PRIMARY,
                              activebackground=ParagonTheme.RED_PRIMARY,
                              activeforeground="#ffffff",
-                             font=("Segoe UI", 12), bd=0, relief="flat")
+                             font=("Bebas Neue", 14), bd=0, relief="flat")
         self._build_menu()
         try:
             tk.Canvas.configure(self, cursor="hand2")
@@ -4012,6 +4020,67 @@ class ParagonTabview(ctk.CTkTabview):
             self._segmented_button.grid_configure(sticky="w")
         except Exception:
             pass
+
+
+class ParagonGradientTabview(ctk.CTkFrame):
+    """A drop-in replacement for CTkTabview whose tab buttons use the Paragon
+    red→orange gradient: the active tab shows the full-brightness gradient, the
+    inactive tabs a darkened gradient (matching the library focus style). It
+    mimics the small slice of the CTkTabview API this app uses:
+    add(name) / tab(name) / set(name) / get()."""
+    def __init__(self, master, **kwargs):
+        # Swallow CTkTabview-only kwargs so existing call sites drop in cleanly.
+        for k in ('segmented_button_fg_color', 'segmented_button_selected_color',
+                  'segmented_button_selected_hover_color',
+                  'segmented_button_unselected_color',
+                  'segmented_button_unselected_hover_color', 'text_color'):
+            kwargs.pop(k, None)
+        kwargs.setdefault('fg_color', ParagonTheme.BG_SECONDARY)
+        kwargs.setdefault('corner_radius', 8)
+        super().__init__(master, **kwargs)
+        self._names = []
+        self._buttons = {}
+        self._frames = {}
+        self._current = None
+        self._header = ctk.CTkFrame(self, fg_color="transparent")
+        self._header.pack(fill="x", padx=4, pady=(4, 6))
+        self._body = ctk.CTkFrame(self, fg_color="transparent")
+        self._body.pack(fill="both", expand=True)
+
+    def add(self, name):
+        if name in self._frames:
+            return self._frames[name]
+        btn = ParagonButton(self._header, text=name, fg_color=ParagonTheme.RED_PRIMARY,
+                            width=170, height=40, corner_radius=8,
+                            font=ctk.CTkFont(family="Bebas Neue", size=20),
+                            command=lambda n=name: self.set(n))
+        btn.pack(side="left", padx=(0, 6))
+        frame = ctk.CTkFrame(self._body, fg_color="transparent")
+        self._names.append(name)
+        self._buttons[name] = btn
+        self._frames[name] = frame
+        if self._current is None:
+            self.set(name)
+        else:
+            btn.set_selected(False)
+        return frame
+
+    def tab(self, name):
+        return self._frames[name]
+
+    def set(self, name):
+        if name not in self._frames:
+            return
+        self._current = name
+        for n in self._names:
+            self._buttons[n].set_selected(n == name)
+            if n == name:
+                self._frames[n].pack(fill="both", expand=True)
+            else:
+                self._frames[n].pack_forget()
+
+    def get(self):
+        return self._current
 
 
 class ParagonProgressBar(ctk.CTkProgressBar):
@@ -12942,11 +13011,12 @@ class TVEditorDialog(ctk.CTkToplevel):
         self._create_show_extended_tab(self.show_tabs.tab("Extended"))
         self._create_stream_tab(self.show_tabs.tab("Stream Details"))
         
-        # Episode tabs - hidden initially
-        self.episode_tabs = ctk.CTkTabview(middle_frame, fg_color=ParagonTheme.BG_SECONDARY,
-                                           segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                           segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
-                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        # Episode tabs - hidden initially (gradient tab buttons: active = bright
+        # gradient, inactive = darkened gradient)
+        self.episode_tabs = ParagonGradientTabview(middle_frame,
+                                                   fg_color=ParagonTheme.BG_SECONDARY,
+                                                   border_color=ParagonTheme.BORDER_GOLD,
+                                                   border_width=1)
 
         self.episode_tabs.add("Episode Info")
         self.episode_tabs.add("Stream Details")
@@ -12994,53 +13064,87 @@ class TVEditorDialog(ctk.CTkToplevel):
             self.episode_tabs.pack(fill="both", expand=True)
     
     def _populate_episodes_list(self):
-        """Populate the episodes list"""
+        """Populate the episodes list as gradient Canvas cards (like the TV
+        library show list)."""
         for widget in self.episodes_list.winfo_children():
             widget.destroy()
-        
+        self.episode_widgets = {}
+
         # Sort episodes by season and episode number
         sorted_files = sorted(self.files, key=lambda f: (
             self.episodes_data.get(f, {}).get('season', 0),
             self.episodes_data.get(f, {}).get('episode', 0)
         ))
-        
+
         current_season = None
         for f in sorted_files:
             ep_data = self.episodes_data.get(f, {})
             season = ep_data.get('season', 1)
             episode = ep_data.get('episode', 1)
             title = ep_data.get('title', '') or os.path.basename(f)
-            
-            # Season header
+
+            # Season header — large, Bebas Neue, white
             if season != current_season:
                 current_season = season
-                season_lbl = ctk.CTkLabel(
+                ctk.CTkLabel(
                     self.episodes_list, text=f"Season {season}",
-                    font=ctk.CTkFont(size=14, weight="bold"),
-                    text_color=ParagonTheme.GOLD
-                )
-                season_lbl.pack(fill="x", padx=5, pady=(10, 5))
-            
-            # Episode row
-            ep_frame = ctk.CTkFrame(self.episodes_list, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=4)
-            ep_frame.pack(fill="x", pady=2, padx=5)
-            ep_frame.bind("<Button-1>", lambda e, file=f: self._select_episode(file))
-            
-            ep_text = f"E{episode:02d}: {title[:30]}{'...' if len(title) > 30 else ''}"
-            ep_lbl = ctk.CTkLabel(ep_frame, text=ep_text, font=ctk.CTkFont(size=13),
-                                 text_color=ParagonTheme.TEXT_PRIMARY, anchor="w")
-            ep_lbl.pack(fill="x", padx=10, pady=6)
-            ep_lbl.bind("<Button-1>", lambda e, file=f: self._select_episode(file))
-    
+                    font=ctk.CTkFont(family="Bebas Neue", size=32),
+                    text_color=ParagonTheme.TEXT_PRIMARY, anchor="w"
+                ).pack(fill="x", padx=8, pady=(14, 6))
+
+            # Episode row-card
+            row = tk.Canvas(self.episodes_list, height=50, highlightthickness=0, bd=0,
+                            bg=ParagonTheme.BG_DARK)
+            row.pack(fill="x", pady=2, padx=2)
+            row._file = f
+            row._text = f"E{episode:02d}: {title}"
+            row._selected = False
+            row._photo = None
+            row.bind("<Button-1>", lambda e, file=f: self._select_episode(file))
+            row.bind("<Configure>", lambda e, r=row: self._draw_episode_row(r))
+            self.episode_widgets[f] = row
+
+    def _draw_episode_row(self, row):
+        try:
+            row.delete("all")
+            w = row.winfo_width() or 280
+            h = 50
+            if row._selected:
+                photo = make_gradient_photo(max(2, w - 4), h - 6, radius=8)
+                if photo is not None:
+                    row._photo = photo
+                    row.create_image(2, 3, image=photo, anchor="nw")
+                else:
+                    row.create_rectangle(2, 3, w - 2, h - 3,
+                                         fill=ParagonTheme.RED_PRIMARY, outline="")
+                fg = "#ffffff"
+            else:
+                row._photo = None
+                row.create_rectangle(2, 3, w - 2, h - 3,
+                                     fill=ParagonTheme.BG_TERTIARY,
+                                     outline=ParagonTheme.BORDER_DARK)
+                fg = ParagonTheme.TEXT_PRIMARY
+            row.create_text(14, h // 2, text=row._text, anchor="w",
+                            fill=fg, font=("Bebas Neue", 16))
+        except Exception:
+            pass
+
     def _select_episode(self, file: str):
         """Select an episode for editing"""
         self.current_episode = file
         self.current_file = file
-        
-        # Highlight in list
-        for widget in self.episodes_list.winfo_children():
-            if isinstance(widget, ctk.CTkFrame):
-                widget.configure(fg_color=ParagonTheme.BG_TERTIARY)
+
+        # Highlight the selected episode card
+        prev = getattr(self, '_selected_episode_file', None)
+        if prev and prev in self.episode_widgets and prev != file:
+            pr = self.episode_widgets[prev]
+            pr._selected = False
+            self._draw_episode_row(pr)
+        if file in self.episode_widgets:
+            cr = self.episode_widgets[file]
+            cr._selected = True
+            self._draw_episode_row(cr)
+        self._selected_episode_file = file
         
         # Populate episode fields from local data first
         ep_data = self.episodes_data.get(file, {})
