@@ -8272,13 +8272,17 @@ class MovieEditorDialog(ctk.CTkToplevel):
         inner.pack(fill="both", expand=True, padx=2, pady=2)
         
         self._create_header(inner)
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(inner)
+
         content = ctk.CTkFrame(inner, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=15, pady=(0, 10))
-        
+
         # Left side - Movie list (resizable with PanedWindow)
         # We'll use a frame with a drag handle for resizing
-        self.left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=250)
+        self.left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=250,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.left_panel.pack(side="left", fill="y", padx=(0, 10))
         self.left_panel.pack_propagate(False)
         
@@ -8307,28 +8311,30 @@ class MovieEditorDialog(ctk.CTkToplevel):
         self.tabs = ctk.CTkTabview(center_panel, fg_color=ParagonTheme.BG_SECONDARY,
                                    segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
                                    segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
-                                   segmented_button_unselected_color=ParagonTheme.BG_TERTIARY)
+                                   segmented_button_unselected_color=ParagonTheme.BG_TERTIARY,
+                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.tabs.pack(fill="both", expand=True)
-        
+
         self.tabs.add("Information")
         self.tabs.add("Extended")
         self.tabs.add("Stream Details")
-        
+
         self._create_info_tab(self.tabs.tab("Information"))
         self._create_extended_tab(self.tabs.tab("Extended"))
         self._create_stream_tab(self.tabs.tab("Stream Details"))
-        
+
         # Right side - Artwork
-        right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300)
+        right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300,
+                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         right_panel.pack(side="right", fill="y")
         right_panel.pack_propagate(False)
-        
+
         self._create_artwork_panel(right_panel)
-        
+
         # Bottom buttons
         btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
         btn_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+
         ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.destroy, width=120).pack(side="left")
         ParagonButton(btn_frame, text="SAVE ALL", command=self._save_all, width=160).pack(side="right")
     
@@ -12238,15 +12244,19 @@ class TVEditorDialog(ctk.CTkToplevel):
         inner.pack(fill="both", expand=True, padx=2, pady=2)
         
         self._create_header(inner)
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(inner)
+
         content = ctk.CTkFrame(inner, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=15, pady=(0, 10))
-        
+
         # Left panel - Episodes list
-        self.left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=280)
+        self.left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=280,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.left_panel.pack(side="left", fill="y", padx=(0, 10))
         self.left_panel.pack_propagate(False)
-        
+
         # Mode switcher at top of left panel
         mode_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
         mode_frame.pack(fill="x", padx=10, pady=10)
@@ -12298,7 +12308,8 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Show tabs
         self.show_tabs = ctk.CTkTabview(middle_frame, fg_color=ParagonTheme.BG_SECONDARY,
                                         segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                        segmented_button_selected_color=ParagonTheme.RED_PRIMARY)
+                                        segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
+                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.show_tabs.pack(fill="both", expand=True)
         
         self.show_tabs.add("Information")
@@ -12312,16 +12323,18 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Episode tabs - hidden initially
         self.episode_tabs = ctk.CTkTabview(middle_frame, fg_color=ParagonTheme.BG_SECONDARY,
                                            segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                           segmented_button_selected_color=ParagonTheme.RED_PRIMARY)
-        
+                                           segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
+                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+
         self.episode_tabs.add("Episode Info")
         self.episode_tabs.add("Stream Details")
         
         self._create_episode_info_tab(self.episode_tabs.tab("Episode Info"))
         self._create_episode_stream_tab(self.episode_tabs.tab("Stream Details"))
-        
+
         # Right side - Artwork
-        right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300)
+        right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300,
+                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         right_panel.pack(side="right", fill="y")
         right_panel.pack_propagate(False)
         
