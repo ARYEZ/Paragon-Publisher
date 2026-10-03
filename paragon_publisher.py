@@ -3530,6 +3530,7 @@ class ParagonButton(ctk.CTkButton):
         }
         defaults.update(kwargs)
         super().__init__(master, **defaults)
+        apply_button_gradient(self)
 
 
 class ParagonSecondaryButton(ctk.CTkButton):
@@ -3555,13 +3556,14 @@ class ParagonGoldButton(ctk.CTkButton):
         defaults = {
             'fg_color': ParagonTheme.GOLD,
             'hover_color': ParagonTheme.GOLD_LIGHT,
-            'text_color': "#000000",
+            'text_color': ParagonTheme.TEXT_PRIMARY,
             'corner_radius': 6,
             'font': ctk.CTkFont(family="Bebas Neue", size=28),
             'height': 54,
         }
         defaults.update(kwargs)
         super().__init__(master, **defaults)
+        apply_button_gradient(self)
 
 
 class ParagonEntry(ctk.CTkEntry):
@@ -9849,12 +9851,21 @@ def _build_gradient_pil(width, height, left_hex=None, right_hex=None,
 
 
 def make_paragon_gradient(width, height, **kw):
-    """CTkImage version of the Paragon gradient (for CTk widgets)."""
+    """CTkImage version of the Paragon gradient (for CTk widgets). Cached by
+    size + colors so repeated buttons reuse the same texture."""
+    width = max(2, int(width))
+    height = max(2, int(height))
+    key = (width, height) + tuple(sorted(kw.items()))
+    cached = _GRADIENT_CACHE.get(key)
+    if cached is not None:
+        return cached
     img = _build_gradient_pil(width, height, **kw)
     if img is None:
         return None
     try:
-        return ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+        cimg = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+        _GRADIENT_CACHE[key] = cimg
+        return cimg
     except Exception:
         return None
 
@@ -9870,6 +9881,56 @@ def make_gradient_photo(width, height, **kw):
     except Exception as e:
         print(f"Gradient photo failed: {e}")
         return None
+
+
+def _lighten(hex_color, factor=1.15):
+    r, g, b = _hex_rgb(hex_color)
+    return "#%02x%02x%02x" % (min(255, int(r * factor)),
+                              min(255, int(g * factor)),
+                              min(255, int(b * factor)))
+
+
+def apply_button_gradient(button, left_hex=None, right_hex=None):
+    """Paint a red→orange gradient as a CTkButton's background, repainting on
+    resize and brightening on hover. The button keeps its fg_color as a
+    fallback if Pillow/image rendering is unavailable."""
+    if not HAS_PIL:
+        return
+    base = (left_hex or "#d81d45", right_hex or ParagonTheme.GOLD)
+    hov = (_lighten(base[0], 1.18), _lighten(base[1], 1.18))
+    state = {"hover": False}
+    try:
+        radius = int(button.cget("corner_radius")) or 8
+    except Exception:
+        radius = 8
+
+    def paint(*_):
+        try:
+            w = button.winfo_width()
+            h = button.winfo_height()
+            if w < 8 or h < 8:
+                return
+            l, r = hov if state["hover"] else base
+            img = make_paragon_gradient(w, h, left_hex=l, right_hex=r,
+                                        radius=radius, gloss=True)
+            if img is not None:
+                button._grad_img = img
+                button.configure(image=img, compound="center")
+        except Exception:
+            pass
+
+    def on_enter(_):
+        state["hover"] = True
+        paint()
+
+    def on_leave(_):
+        state["hover"] = False
+        paint()
+
+    button.after(40, paint)
+    button.bind("<Configure>", paint, add="+")
+    button.bind("<Enter>", on_enter, add="+")
+    button.bind("<Leave>", on_leave, add="+")
 
 
 class TVLibraryDialog(ctk.CTkToplevel):
@@ -10248,15 +10309,16 @@ class TVLibraryDialog(ctk.CTkToplevel):
         info_inner = ctk.CTkFrame(info_frame, fg_color="transparent")
         info_inner.pack(fill="x", padx=15, pady=15)
         
-        # Poster
-        poster_frame = ctk.CTkFrame(info_inner, fg_color=ParagonTheme.BG_TERTIARY, width=120, height=180, corner_radius=6)
-        poster_frame.pack(side="left", padx=(0, 20))
+        # Poster (large, uses the detail panel's spare space)
+        poster_frame = ctk.CTkFrame(info_inner, fg_color=ParagonTheme.BG_TERTIARY, width=300, height=450, corner_radius=6,
+                                    border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        poster_frame.pack(side="left", padx=(0, 25))
         poster_frame.pack_propagate(False)
-        
+
         if show.get('poster_path') and HAS_PIL:
             try:
                 img = Image.open(show['poster_path'])
-                img.thumbnail((120, 180), Image.Resampling.LANCZOS)
+                img.thumbnail((300, 450), Image.Resampling.LANCZOS)
                 photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
                 lbl = ctk.CTkLabel(poster_frame, image=photo, text="")
                 lbl.pack(expand=True)
