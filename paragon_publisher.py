@@ -10425,16 +10425,16 @@ class TVLibraryDialog(ctk.CTkToplevel):
         
         year_str = f" ({show.get('year')})" if show.get('year') else ""
         ctk.CTkLabel(header, text=f"{show['name']}{year_str}",
-                    font=ctk.CTkFont(family="Bebas Neue", size=36),
+                    font=ctk.CTkFont(family="Bebas Neue", size=54),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        
+
         ctk.CTkLabel(header, text=f"{show['episode_count']} episodes",
-                    font=ctk.CTkFont(family="Bebas Neue", size=24),
-                    text_color=ParagonTheme.TEXT_MUTED).pack(side="left", padx=(15, 0))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=34),
+                    text_color=ParagonTheme.TEXT_MUTED).pack(side="left", padx=(18, 0))
+
         ParagonButton(header, text="📝 OPEN FULL EDITOR",
                      command=lambda s=show: self._open_editor(s),
-                     width=200, height=44).pack(side="right")
+                     width=240, height=52).pack(side="right")
         
         # Info section with poster
         info_frame = ctk.CTkFrame(self.right_panel, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
@@ -10468,9 +10468,9 @@ class TVLibraryDialog(ctk.CTkToplevel):
         info_text.pack(side="left", fill="both", expand=True)
         
         ctk.CTkLabel(info_text, text=f"Path: {show['path']}",
-                    font=ctk.CTkFont(family="Bebas Neue", size=18),
+                    font=ctk.CTkFont(family="Bebas Neue", size=26),
                     text_color=ParagonTheme.TEXT_MUTED,
-                    wraplength=600, anchor="w", justify="left").pack(anchor="w")
+                    wraplength=900, anchor="w", justify="left").pack(anchor="w", pady=(4, 0))
         
         # Status
         status = []
@@ -10479,8 +10479,8 @@ class TVLibraryDialog(ctk.CTkToplevel):
         if show.get('tvdb_id'): status.append(f"TVDB: {show['tvdb_id']}")
         
         ctk.CTkLabel(info_text, text=" | ".join(status),
-                    font=ctk.CTkFont(family="Bebas Neue", size=20),
-                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(8, 0))
+                    font=ctk.CTkFont(family="Bebas Neue", size=30),
+                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(14, 0))
         
         # Artwork
         artwork = []
@@ -10489,33 +10489,33 @@ class TVLibraryDialog(ctk.CTkToplevel):
         artwork.append("✓ Logo" if show.get('has_logo') else "✗ Logo")
         
         ctk.CTkLabel(info_text, text=" | ".join(artwork),
-                    font=ctk.CTkFont(family="Bebas Neue", size=20),
-                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(4, 0))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=30),
+                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(8, 0))
+
         # Quick Actions
         ctk.CTkLabel(self.right_panel, text="QUICK ACTIONS",
-                    font=ctk.CTkFont(family="Bebas Neue", size=28),
-                    text_color=ParagonTheme.TEXT_PRIMARY).pack(anchor="w", padx=15, pady=(20, 10))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=38),
+                    text_color=ParagonTheme.TEXT_PRIMARY).pack(anchor="w", padx=15, pady=(24, 12))
+
         actions_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
         actions_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+
         ParagonButton(actions_frame, text="🔍 SEARCH TMDB",
                      command=lambda s=show: self._search_tmdb(s),
-                     width=180, height=44).pack(side="left", padx=(0, 10))
-        
+                     width=210, height=54).pack(side="left", padx=(0, 12))
+
         ParagonButton(actions_frame, text="🔄 RESCAN SHOW",
                      command=lambda s=show: self._rescan_show(s),
                      fg_color=ParagonTheme.BG_TERTIARY,
                      hover_color=ParagonTheme.BG_HOVER,
-                     width=180, height=44).pack(side="left", padx=(0, 10))
-        
+                     width=210, height=54).pack(side="left", padx=(0, 12))
+
         if not show.get('has_nfo'):
             ParagonButton(actions_frame, text="📄 CREATE NFO",
                          command=lambda s=show: self._open_editor(s),
                          fg_color=ParagonTheme.BG_TERTIARY,
                          hover_color=ParagonTheme.BG_HOVER,
-                         width=160, height=44).pack(side="left", padx=(0, 10))
+                         width=190, height=54).pack(side="left", padx=(0, 12))
     
     def _open_editor(self, show):
         if show.get('video_files'):
@@ -12565,16 +12565,16 @@ class TVEditorDialog(ctk.CTkToplevel):
         mode_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
         mode_frame.pack(fill="x", padx=10, pady=10)
         
-        self.show_mode_btn = ctk.CTkButton(
-            mode_frame, text="📺 SHOW", height=35,
+        self.show_mode_btn = ParagonButton(
+            mode_frame, text="📺 SHOW", height=38,
             fg_color=ParagonTheme.RED_PRIMARY,
             hover_color=ParagonTheme.RED_LIGHT,
             command=lambda: self._switch_mode("show")
         )
         self.show_mode_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-        
-        self.episode_mode_btn = ctk.CTkButton(
-            mode_frame, text="🎬 EPISODES", height=35,
+
+        self.episode_mode_btn = ParagonButton(
+            mode_frame, text="🎬 EPISODES", height=38,
             fg_color=ParagonTheme.BG_TERTIARY,
             hover_color=ParagonTheme.BG_HOVER,
             command=lambda: self._switch_mode("episode")
