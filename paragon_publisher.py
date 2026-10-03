@@ -4043,12 +4043,12 @@ class ParagonGradientTabview(ctk.CTkFrame):
         self._frames = {}
         self._current = None
         self._header = ctk.CTkFrame(self, fg_color="transparent")
-        self._header.pack(fill="x", padx=4, pady=(4, 6))
+        self._header.pack(fill="x", padx=4, pady=(4, 2))
         # Inner holder that shrinks to its buttons so the row centers.
         self._btnrow = ctk.CTkFrame(self._header, fg_color="transparent")
         self._btnrow.pack(anchor="center")
         self._body = ctk.CTkFrame(self, fg_color="transparent")
-        self._body.pack(fill="both", expand=True)
+        self._body.pack(fill="both", expand=True, padx=2, pady=(0, 2))
 
     def add(self, name):
         if name in self._frames:
@@ -12942,8 +12942,15 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Paragon accent divider under the header
         paragon_accent_lines(inner)
 
+        # Bottom action bar — packed FIRST with side="bottom" so it always
+        # reserves its space and the panels above are never clipped under it.
+        btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        btn_frame.pack(side="bottom", fill="x", padx=15, pady=(6, 12))
+        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.destroy, width=100).pack(side="left")
+        ParagonButton(btn_frame, text="SAVE ALL", command=self._save_all, width=130).pack(side="right")
+
         content = ctk.CTkFrame(inner, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+        content.pack(side="top", fill="both", expand=True, padx=15, pady=(0, 6))
 
         # Left panel - Episodes list
         self.left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=280,
@@ -12999,11 +13006,12 @@ class TVEditorDialog(ctk.CTkToplevel):
         middle_frame = ctk.CTkFrame(content, fg_color="transparent")
         middle_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
-        # Show tabs
-        self.show_tabs = ctk.CTkTabview(middle_frame, fg_color=ParagonTheme.BG_SECONDARY,
-                                        segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                        segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
-                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        # Show tabs (gradient tab buttons: active = bright gradient, inactive =
+        # darkened gradient — matching the episode editor tabs)
+        self.show_tabs = ParagonGradientTabview(middle_frame,
+                                                fg_color=ParagonTheme.BG_SECONDARY,
+                                                border_color=ParagonTheme.BORDER_GOLD,
+                                                border_width=1)
         self.show_tabs.pack(fill="both", expand=True)
         
         self.show_tabs.add("Information")
@@ -13034,14 +13042,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         right_panel.pack_propagate(False)
         
         self._create_artwork_panel(right_panel)
-        
-        # Bottom buttons
-        btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=15, pady=(5, 12))
-        
-        ParagonSecondaryButton(btn_frame, text="CANCEL", command=self.destroy, width=100).pack(side="left")
-        ParagonButton(btn_frame, text="SAVE ALL", command=self._save_all, width=130).pack(side="right")
-    
+
     def _switch_mode(self, mode: str):
         """Switch between show and episode editing modes"""
         self.edit_mode = mode
@@ -13922,6 +13923,13 @@ class TVEditorDialog(ctk.CTkToplevel):
     
     def _create_episode_info_tab(self, parent):
         """Create the episode editing tab"""
+        # Pinned action bar at the bottom so SAVE is always visible (not
+        # scrolled off the end of the form).
+        action_bar = ctk.CTkFrame(parent, fg_color="transparent")
+        action_bar.pack(side="bottom", fill="x", padx=10, pady=(4, 10))
+        ParagonButton(action_bar, text="💾 SAVE EPISODE NFO",
+                     command=self._save_current_episode, width=200).pack(side="right")
+
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
@@ -13974,10 +13982,15 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(file_frame, text="File", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
-        self.ep_file_label = ctk.CTkLabel(file_frame, text="Select an episode",
+        # Framed box around the filename so it matches the other fields
+        file_box = ctk.CTkFrame(file_frame, fg_color=ParagonTheme.BG_DARK, corner_radius=6,
+                                border_color=ParagonTheme.BORDER_DARK, border_width=1, height=36)
+        file_box.pack(side="left", fill="x", expand=True)
+        file_box.pack_propagate(False)
+        self.ep_file_label = ctk.CTkLabel(file_box, text="Select an episode", anchor="w",
                                           text_color=ParagonTheme.TEXT_PRIMARY,
                                           font=ctk.CTkFont(size=self.FONT_NORMAL))
-        self.ep_file_label.pack(side="left", fill="x", expand=True)
+        self.ep_file_label.pack(side="left", fill="x", expand=True, padx=10)
         
         # Season/Episode
         se_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14098,11 +14111,6 @@ class TVEditorDialog(ctk.CTkToplevel):
                     fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
                     height=36, placeholder_text="Comma-separated names").pack(side="left", fill="x", expand=True)
         
-        # Buttons
-        btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        btn_frame.pack(fill="x", pady=15)
-        ParagonButton(btn_frame, text="💾 SAVE EPISODE NFO", command=self._save_current_episode, width=200).pack(side="right")
-    
     def _manual_fetch_episode(self):
         """Manually fetch episode data from TMDB"""
         if not self.show_details or not self.show_details.get('id'):
