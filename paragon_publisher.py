@@ -3557,14 +3557,15 @@ class ParagonButton(tk.Canvas):
             self._text_color = tc or ParagonTheme.TEXT_PRIMARY
 
     def _as_font(self, font):
+        # Button text is always Bebas Neue; only the size follows the request.
         try:
             if font is None:
                 return ("Bebas Neue", 18)
             if isinstance(font, (tuple, list)):
-                return tuple(font)
-            fam = font.cget("family")
+                sz = int(font[1]) if len(font) > 1 else 18
+                return ("Bebas Neue", max(11, min(sz, 22)))
             sz = int(font.cget("size"))
-            return (fam, max(11, min(sz, 20)))
+            return ("Bebas Neue", max(11, min(sz, 22)))
         except Exception:
             return ("Bebas Neue", 18)
 
@@ -3792,16 +3793,17 @@ class ParagonRadioButton(ctk.CTkRadioButton):
 
 
 def _tk_font(font, default_size=16):
+    # Dropdown value text is always Bebas Neue; only the size follows the request.
     try:
         if font is None:
-            return ("Segoe UI", default_size)
+            return ("Bebas Neue", default_size)
         if isinstance(font, (tuple, list)):
-            return tuple(font)
-        fam = font.cget("family")
+            sz = int(font[1]) if len(font) > 1 else default_size
+            return ("Bebas Neue", max(10, min(sz, 20)))
         sz = int(font.cget("size"))
-        return (fam, max(10, min(sz, 18)))
+        return ("Bebas Neue", max(10, min(sz, 20)))
     except Exception:
-        return ("Segoe UI", default_size)
+        return ("Bebas Neue", default_size)
 
 
 class ParagonOptionMenu(tk.Canvas):
@@ -8979,8 +8981,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4,
-                                         cursor="hand2")
-        self.poster_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                         cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.poster_frame.pack_propagate(False)
         self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
@@ -8993,8 +8995,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4,
-                                       cursor="hand2")
-        self.logo_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                       cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.logo_frame.pack_propagate(False)
         self.logo_label = ctk.CTkLabel(self.logo_frame, text="No Logo\n(Click to choose)", 
                                        text_color=ParagonTheme.TEXT_SECONDARY,
@@ -9007,8 +9009,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(scroll, text="Fanart (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
-                                         cursor="hand2")
-        self.fanart_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                         cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.fanart_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.fanart_frame.pack_propagate(False)
         self.fanart_label = ctk.CTkLabel(self.fanart_frame, text="No Fanart\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
@@ -9021,8 +9023,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
-                                            cursor="hand2")
-        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                            cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.landscape_frame.pack_propagate(False)
         self.landscape_label = ctk.CTkLabel(self.landscape_frame, text="No Landscape\n(Click to choose)", 
                                             text_color=ParagonTheme.TEXT_SECONDARY,
@@ -14368,10 +14370,11 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Poster
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
-        self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4, cursor="hand2")
-        self.poster_frame.pack(fill="x", padx=8, pady=(0, 12))
+        self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4, cursor="hand2",
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.poster_frame.pack_propagate(False)
-        self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)", 
+        self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)",
                                          text_color=ParagonTheme.TEXT_SECONDARY, cursor="hand2")
         self.poster_label.pack(expand=True)
         self.poster_frame.bind("<Button-1>", lambda e: self._choose_artwork('poster'))
@@ -14380,8 +14383,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Logo
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
-        self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4, cursor="hand2")
-        self.logo_frame.pack(fill="x", padx=8, pady=(0, 12))
+        self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4, cursor="hand2",
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.logo_frame.pack_propagate(False)
         self.logo_label = ctk.CTkLabel(self.logo_frame, text="No Logo", text_color=ParagonTheme.TEXT_SECONDARY, cursor="hand2")
         self.logo_label.pack(expand=True)
@@ -14391,8 +14395,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Fanart
         ctk.CTkLabel(scroll, text="Fanart (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
-        self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=120, corner_radius=4, cursor="hand2")
-        self.fanart_frame.pack(fill="x", padx=8, pady=(0, 12))
+        self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=120, corner_radius=4, cursor="hand2",
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.fanart_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.fanart_frame.pack_propagate(False)
         self.fanart_label = ctk.CTkLabel(self.fanart_frame, text="No Fanart", text_color=ParagonTheme.TEXT_SECONDARY, cursor="hand2")
         self.fanart_label.pack(expand=True)
@@ -14402,8 +14407,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Landscape
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
-        self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4, cursor="hand2")
-        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 12))
+        self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4, cursor="hand2",
+                                            border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.landscape_frame.pack_propagate(False)
         self.landscape_label = ctk.CTkLabel(self.landscape_frame, text="No Landscape", text_color=ParagonTheme.TEXT_SECONDARY, cursor="hand2")
         self.landscape_label.pack(expand=True)
@@ -15168,8 +15174,8 @@ if HAS_DND:
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4,
-                                         cursor="hand2")
-        self.poster_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                         cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.poster_frame.pack_propagate(False)
         self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
@@ -15182,8 +15188,8 @@ if HAS_DND:
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4,
-                                       cursor="hand2")
-        self.logo_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                       cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.logo_frame.pack_propagate(False)
         self.logo_label = ctk.CTkLabel(self.logo_frame, text="No Logo\n(Click to choose)",
                                        text_color=ParagonTheme.TEXT_SECONDARY,
@@ -15210,8 +15216,8 @@ if HAS_DND:
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
-                                            cursor="hand2")
-        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 12))
+                                            cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.landscape_frame.pack_propagate(False)
         self.landscape_label = ctk.CTkLabel(self.landscape_frame, text="No Landscape\n(Click to choose)",
                                             text_color=ParagonTheme.TEXT_SECONDARY,
