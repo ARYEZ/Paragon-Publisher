@@ -9764,6 +9764,28 @@ def _set_library_sort(mode):
         pass
 
 
+def paragon_bordered_window(parent):
+    """Wrap a dialog's body in the Paragon 'gradient outline': a gold-bordered
+    outer frame with a black inner panel (same look as the main window).
+    Returns the inner frame to build content into."""
+    outer = ctk.CTkFrame(parent, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+    outer.pack(fill="both", expand=True, padx=6, pady=6)
+    inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+    inner.pack(fill="both", expand=True, padx=2, pady=2)
+    return inner
+
+
+def paragon_accent_lines(parent, pady=(6, 2)):
+    """Red + orange stacked accent lines — the Paragon decorative divider."""
+    container = ctk.CTkFrame(parent, fg_color="transparent", height=6)
+    container.pack(fill="x", padx=15, pady=pady)
+    container.pack_propagate(False)
+    ctk.CTkFrame(container, fg_color=ParagonTheme.RED_DARK, height=3,
+                 corner_radius=1).pack(fill="x", pady=(0, 2))
+    ctk.CTkFrame(container, fg_color=ParagonTheme.GOLD, height=2,
+                 corner_radius=1).pack(fill="x")
+
+
 class TVLibraryDialog(ctk.CTkToplevel):
     """MediaElch-style TV Library browser for managing multiple TV shows"""
     
@@ -9792,13 +9814,14 @@ class TVLibraryDialog(ctk.CTkToplevel):
         self._load_library()
     
     def _create_ui(self):
-        # Main container
-        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
-        main.pack(fill="both", expand=True)
-        
+        # Main container — framed in the Paragon gold/red outline
+        main = paragon_bordered_window(self)
+
         # Header
-        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80)
-        header.pack(fill="x")
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80,
+                              border_color=ParagonTheme.BORDER_RED, border_width=1,
+                              corner_radius=8)
+        header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
         
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
@@ -9830,13 +9853,17 @@ class TVLibraryDialog(ctk.CTkToplevel):
                                          text_color=ParagonTheme.TEXT_SECONDARY,
                                          font=ctk.CTkFont(size=18))
         self.status_label.pack(side="right", padx=(0, 20))
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(main)
+
         # Content
         content = ctk.CTkFrame(main, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         # Left panel
-        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=400)
+        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=400,
+                                  border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         left_panel.pack(side="left", fill="y", padx=(0, 10))
         left_panel.pack_propagate(False)
         
@@ -9872,10 +9899,11 @@ class TVLibraryDialog(ctk.CTkToplevel):
         self.show_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Right panel
-        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8,
+                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.right_panel.pack(side="left", fill="both", expand=True)
-        
-        self.placeholder = ctk.CTkLabel(self.right_panel, 
+
+        self.placeholder = ctk.CTkLabel(self.right_panel,
                                         text="Select a TV show from the list\nto view and edit details",
                                         text_color=ParagonTheme.TEXT_MUTED,
                                         font=ctk.CTkFont(size=24))
@@ -10335,19 +10363,20 @@ class FileLibraryDialog(ctk.CTkToplevel):
     
     def _create_ui(self):
         """Create the file browser UI"""
-        # Main container
-        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
-        main.pack(fill="both", expand=True)
-        
+        # Main container — framed in the Paragon gold/red outline
+        main = paragon_bordered_window(self)
+
         # Header
-        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80)
-        header.pack(fill="x")
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80,
+                              border_color=ParagonTheme.BORDER_RED, border_width=1,
+                              corner_radius=8)
+        header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
-        
+
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
         header_inner.pack(fill="both", expand=True, padx=20, pady=15)
-        
-        ctk.CTkLabel(header_inner, text="📁 FILE LIBRARY", 
+
+        ctk.CTkLabel(header_inner, text="📁 FILE LIBRARY",
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
         
@@ -10371,10 +10400,15 @@ class FileLibraryDialog(ctk.CTkToplevel):
                                          text_color=ParagonTheme.TEXT_SECONDARY,
                                          font=ctk.CTkFont(size=18))
         self.status_label.pack(side="right", padx=(0, 20))
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(main)
+
         # Toolbar
-        toolbar = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=60)
-        toolbar.pack(fill="x", pady=(10, 0))
+        toolbar = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=60,
+                               border_color=ParagonTheme.BORDER_GOLD, border_width=1,
+                               corner_radius=8)
+        toolbar.pack(fill="x", padx=10, pady=(4, 0))
         toolbar.pack_propagate(False)
         
         toolbar_inner = ctk.CTkFrame(toolbar, fg_color="transparent")
@@ -10423,7 +10457,8 @@ class FileLibraryDialog(ctk.CTkToplevel):
         content.pack(fill="both", expand=True, padx=10, pady=10)
         
         # File list panel
-        file_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        file_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8,
+                                  border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         file_panel.pack(fill="both", expand=True)
         
         # File count header
@@ -10733,18 +10768,19 @@ class MovieLibraryDialog(ctk.CTkToplevel):
     
     def _create_ui(self):
         """Create the library browser UI"""
-        # Main container
-        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
-        main.pack(fill="both", expand=True)
-        
+        # Main container — framed in the Paragon gold/red outline
+        main = paragon_bordered_window(self)
+
         # Header
-        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80)
-        header.pack(fill="x")
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80,
+                              border_color=ParagonTheme.BORDER_RED, border_width=1,
+                              corner_radius=8)
+        header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
-        
+
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
         header_inner.pack(fill="both", expand=True, padx=20, pady=15)
-        
+
         ctk.CTkLabel(header_inner, text="🎬 MOVIE LIBRARY",
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
@@ -10771,13 +10807,17 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                                          text_color=ParagonTheme.TEXT_SECONDARY,
                                          font=ctk.CTkFont(size=18))
         self.status_label.pack(side="right", padx=(0, 20))
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(main)
+
         # Content - split into movie list and details
         content = ctk.CTkFrame(main, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         # Left panel - Movie list
-        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=400)
+        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=400,
+                                  border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         left_panel.pack(side="left", fill="y", padx=(0, 10))
         left_panel.pack_propagate(False)
         
@@ -10813,11 +10853,12 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         self.movie_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Right panel - Movie details placeholder
-        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8,
+                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.right_panel.pack(side="left", fill="both", expand=True)
-        
+
         # Initial placeholder
-        self.detail_placeholder = ctk.CTkLabel(self.right_panel, 
+        self.detail_placeholder = ctk.CTkLabel(self.right_panel,
                                                text="Select a movie from the list\nto view and edit details",
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=24))
@@ -11356,18 +11397,19 @@ class MusicLibraryDialog(ctk.CTkToplevel):
     
     def _create_ui(self):
         """Create the library browser UI"""
-        # Main container
-        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
-        main.pack(fill="both", expand=True)
-        
+        # Main container — framed in the Paragon gold/red outline
+        main = paragon_bordered_window(self)
+
         # Header
-        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80)
-        header.pack(fill="x")
+        header = ctk.CTkFrame(main, fg_color=ParagonTheme.BG_SECONDARY, height=80,
+                              border_color=ParagonTheme.BORDER_RED, border_width=1,
+                              corner_radius=8)
+        header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
-        
+
         header_inner = ctk.CTkFrame(header, fg_color="transparent")
         header_inner.pack(fill="both", expand=True, padx=20, pady=15)
-        
+
         ctk.CTkLabel(header_inner, text="🎵 MUSIC LIBRARY",
                     font=ctk.CTkFont(family="Bebas Neue", size=42),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
@@ -11394,13 +11436,17 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                                          text_color=ParagonTheme.TEXT_SECONDARY,
                                          font=ctk.CTkFont(size=18))
         self.status_label.pack(side="right", padx=(0, 20))
-        
+
+        # Paragon accent divider under the header
+        paragon_accent_lines(main)
+
         # Content - three panels: Artists, Albums, Tracks
         content = ctk.CTkFrame(main, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         # Left panel - Artist list
-        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300)
+        left_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=300,
+                                  border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         left_panel.pack(side="left", fill="y", padx=(0, 10))
         left_panel.pack_propagate(False)
         
@@ -11436,7 +11482,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self.artist_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Middle panel - Album list
-        middle_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=350)
+        middle_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8, width=350,
+                                    border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         middle_panel.pack(side="left", fill="y", padx=(0, 10))
         middle_panel.pack_propagate(False)
         
@@ -11460,11 +11507,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self.album_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Right panel - Album/Track details
-        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8)
+        self.right_panel = ctk.CTkFrame(content, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8,
+                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.right_panel.pack(side="left", fill="both", expand=True)
-        
+
         # Initial placeholder
-        self.detail_placeholder = ctk.CTkLabel(self.right_panel, 
+        self.detail_placeholder = ctk.CTkLabel(self.right_panel,
                                                text="Select an artist and album\nto view tracks and details",
                                                text_color=ParagonTheme.TEXT_MUTED,
                                                font=ctk.CTkFont(size=24))
