@@ -501,11 +501,12 @@ class LibraryCache:
 class ParagonTheme:
     """Paragon TV inspired color scheme - Pink & Orange edition"""
     
-    # Core colors
-    BG_DARK = "#0a0a0a"           # Main background
-    BG_SECONDARY = "#111111"      # Panel backgrounds
-    BG_TERTIARY = "#1a1a1a"       # Card/input backgrounds
-    BG_HOVER = "#252525"          # Hover states
+    # Core colors — true black like the Paragon logo; panels are delineated by
+    # their gold/red borders, inputs/cards are only barely lifted off black.
+    BG_DARK = "#000000"           # Main background
+    BG_SECONDARY = "#000000"      # Panel backgrounds
+    BG_TERTIARY = "#0e0e0e"       # Card/input backgrounds
+    BG_HOVER = "#1e1e1e"          # Hover states
     
     # Accent colors
     RED_PRIMARY = "#cc2200"       # Primary red
@@ -537,8 +538,8 @@ class ParagonTheme:
 # (brighter red titles/accents, red-tinted hovers and borders).
 THEMES = {
     "Crimson": {
-        "BG_DARK": "#0a0a0a", "BG_SECONDARY": "#111111", "BG_TERTIARY": "#1a1a1a",
-        "BG_HOVER": "#252525",
+        "BG_DARK": "#000000", "BG_SECONDARY": "#000000", "BG_TERTIARY": "#0e0e0e",
+        "BG_HOVER": "#1e1e1e",
         "RED_PRIMARY": "#cc2200", "RED_LIGHT": "#ff4444", "RED_DARK": "#8b1500",
         "ORANGE": "#ff4444", "GOLD": "#ff6600", "GOLD_LIGHT": "#ff8533",
         "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#b0b0b0",
