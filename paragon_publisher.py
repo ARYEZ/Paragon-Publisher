@@ -3517,20 +3517,163 @@ class ParagonFrame(ctk.CTkFrame):
         )
 
 
-class ParagonButton(ctk.CTkButton):
-    """Paragon-style button with red/orange gradient effect"""
+class ParagonButton(tk.Canvas):
+    """Canvas-based button with the Paragon red→orange gradient background (or a
+    flat fill when given a non-red fg_color). Provides a CTk-compatible
+    configure()/cget() shim so it drops in wherever a CTkButton was used."""
     def __init__(self, master, **kwargs):
-        defaults = {
-            'fg_color': ParagonTheme.RED_PRIMARY,
-            'hover_color': ParagonTheme.RED_LIGHT,
-            'text_color': ParagonTheme.TEXT_PRIMARY,
-            'corner_radius': 6,
-            'font': ctk.CTkFont(family="Bebas Neue", size=28),
-            'height': 50,
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
-        apply_button_gradient(self)
+        width = int(kwargs.pop('width', 140) or 140)
+        height = int(kwargs.pop('height', 50) or 50)
+        super().__init__(master, width=width, height=height,
+                         highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK)
+        self._text = kwargs.pop('text', "")
+        self._command = kwargs.pop('command', None)
+        self._corner = int(kwargs.pop('corner_radius', 8) or 8)
+        self._border_color = kwargs.pop('border_color', None)
+        self._state = kwargs.pop('state', 'normal')
+        self._hover_color = kwargs.pop('hover_color', None)
+        self._font = self._as_font(kwargs.pop('font', None))
+        self._set_colors(kwargs.pop('fg_color', None), kwargs.pop('text_color', None))
+        self._hover = False
+        self._photo = None
+        try:
+            self._apply_cursor()
+        except Exception:
+            pass
+        self.bind('<Configure>', self._draw)
+        self.bind('<Button-1>', self._on_click)
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+
+    def _set_colors(self, fg, tc):
+        if fg in (None, ParagonTheme.RED_PRIMARY, ParagonTheme.GOLD):
+            self._gradient = True
+            self._c1, self._c2 = "#d81d45", ParagonTheme.GOLD
+            self._text_color = tc or "#ffffff"
+        else:
+            self._gradient = False
+            self._c1 = self._c2 = fg
+            self._text_color = tc or ParagonTheme.TEXT_PRIMARY
+
+    def _as_font(self, font):
+        try:
+            if font is None:
+                return ("Bebas Neue", 18)
+            if isinstance(font, (tuple, list)):
+                return tuple(font)
+            fam = font.cget("family")
+            sz = int(font.cget("size"))
+            return (fam, max(11, min(sz, 20)))
+        except Exception:
+            return ("Bebas Neue", 18)
+
+    def _apply_cursor(self):
+        try:
+            tk.Canvas.configure(self, cursor="arrow" if self._state == "disabled" else "hand2")
+        except Exception:
+            pass
+
+    def _draw(self, *_):
+        try:
+            self.delete("all")
+            w = self.winfo_width() or int(self["width"])
+            h = self.winfo_height() or int(self["height"])
+            if w < 4 or h < 4:
+                return
+            if self._gradient:
+                c1, c2 = (_lighten(self._c1, 1.18), _lighten(self._c2, 1.18)) \
+                    if self._hover else (self._c1, self._c2)
+                border, gloss = "#ff8a3d", True
+            else:
+                base = (self._hover_color or _lighten(self._c1, 1.2)) if self._hover else self._c1
+                c1 = c2 = base
+                border, gloss = self._border_color, False
+            photo = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
+                                        radius=self._corner, gloss=gloss, border_hex=border)
+            if photo is not None:
+                self._photo = photo
+                self.create_image(0, 0, image=photo, anchor="nw")
+            else:
+                self.create_rectangle(1, 1, w - 1, h - 1, fill=self._c1, outline=border or "")
+            fill = ParagonTheme.TEXT_DISABLED if self._state == "disabled" else self._text_color
+            self.create_text(w // 2, h // 2, text=self._text, fill=fill, font=self._font)
+        except Exception:
+            pass
+
+    def _on_click(self, _):
+        if self._state == "disabled":
+            return
+        if callable(self._command):
+            try:
+                self._command()
+            except Exception as e:
+                print(f"Button command error: {e}")
+
+    def _on_enter(self, _):
+        if self._state == "disabled":
+            return
+        self._hover = True
+        self._draw()
+
+    def _on_leave(self, _):
+        self._hover = False
+        self._draw()
+
+    # --- CTk-compatible shims so existing .configure()/.cget() calls still work ---
+    def configure(self, **kwargs):
+        redraw = False
+        if 'text' in kwargs:
+            self._text = kwargs.pop('text'); redraw = True
+        if 'command' in kwargs:
+            self._command = kwargs.pop('command')
+        if 'state' in kwargs:
+            self._state = kwargs.pop('state'); redraw = True
+            self._apply_cursor()
+        if 'text_color' in kwargs:
+            self._text_color = kwargs.pop('text_color'); redraw = True
+        if 'hover_color' in kwargs:
+            self._hover_color = kwargs.pop('hover_color')
+        if 'corner_radius' in kwargs:
+            self._corner = int(kwargs.pop('corner_radius') or 8); redraw = True
+        if 'border_color' in kwargs:
+            self._border_color = kwargs.pop('border_color'); redraw = True
+        if 'font' in kwargs:
+            self._font = self._as_font(kwargs.pop('font')); redraw = True
+        if 'fg_color' in kwargs:
+            self._set_colors(kwargs.pop('fg_color'), self._text_color); redraw = True
+        if 'width' in kwargs:
+            try:
+                tk.Canvas.configure(self, width=int(kwargs.pop('width')))
+            except Exception:
+                kwargs.pop('width', None)
+            redraw = True
+        if 'height' in kwargs:
+            try:
+                tk.Canvas.configure(self, height=int(kwargs.pop('height')))
+            except Exception:
+                kwargs.pop('height', None)
+            redraw = True
+        for k in ('border_width', 'image', 'compound', 'anchor', 'hover'):
+            kwargs.pop(k, None)
+        if kwargs:
+            try:
+                tk.Canvas.configure(self, **kwargs)
+            except Exception:
+                pass
+        if redraw:
+            self._draw()
+    config = configure
+
+    def cget(self, key):
+        store = {'text': self._text, 'state': self._state, 'fg_color': self._c1,
+                 'text_color': self._text_color, 'corner_radius': self._corner,
+                 'command': self._command}
+        if key in store:
+            return store[key]
+        try:
+            return tk.Canvas.cget(self, key)
+        except Exception:
+            return None
 
 
 class ParagonSecondaryButton(ctk.CTkButton):
@@ -3550,20 +3693,11 @@ class ParagonSecondaryButton(ctk.CTkButton):
         super().__init__(master, **defaults)
 
 
-class ParagonGoldButton(ctk.CTkButton):
-    """Gold accent button for primary actions"""
+class ParagonGoldButton(ParagonButton):
+    """Primary action button — same Paragon gradient, a touch taller."""
     def __init__(self, master, **kwargs):
-        defaults = {
-            'fg_color': ParagonTheme.GOLD,
-            'hover_color': ParagonTheme.GOLD_LIGHT,
-            'text_color': ParagonTheme.TEXT_PRIMARY,
-            'corner_radius': 6,
-            'font': ctk.CTkFont(family="Bebas Neue", size=28),
-            'height': 54,
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
-        apply_button_gradient(self)
+        kwargs.setdefault('height', 54)
+        super().__init__(master, **kwargs)
 
 
 class ParagonEntry(ctk.CTkEntry):
