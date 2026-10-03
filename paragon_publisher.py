@@ -9792,6 +9792,71 @@ def paragon_accent_lines(parent, pady=(6, 2)):
                  corner_radius=1).pack(fill="x")
 
 
+def _hex_rgb(h):
+    h = h.lstrip('#')
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+# Cache generated gradient CTkImages by (w, h, colors, radius) so re-selecting
+# rows doesn't re-render the same texture.
+_GRADIENT_CACHE = {}
+
+
+def make_paragon_gradient(width, height, left_hex=None, right_hex=None,
+                          radius=8, border_hex=None, gloss=True):
+    """Return a CTkImage of a horizontal red→orange Paragon gradient with
+    rounded corners (and an optional border/top gloss), like the Kodi focus bar.
+    Returns None if Pillow isn't available."""
+    if not HAS_PIL:
+        return None
+    left_hex = left_hex or "#d81d45"      # bright pink-red (sampled from skin)
+    right_hex = right_hex or ParagonTheme.GOLD  # orange
+    border_hex = border_hex or "#ff8a3d"
+    width = max(2, int(width))
+    height = max(2, int(height))
+    key = (width, height, left_hex, right_hex, radius, border_hex, gloss)
+    cached = _GRADIENT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        from PIL import Image as _Image, ImageDraw as _ImageDraw
+        lr, lg, lb = _hex_rgb(left_hex)
+        rr, rg, rb = _hex_rgb(right_hex)
+        # Horizontal gradient: build one row, then stretch vertically.
+        row = _Image.new("RGB", (width, 1))
+        rpx = row.load()
+        for x in range(width):
+            t = x / (width - 1)
+            rpx[x, 0] = (int(lr + (rr - lr) * t),
+                         int(lg + (rg - lg) * t),
+                         int(lb + (rb - lb) * t))
+        img = row.resize((width, height)).convert("RGBA")
+        if gloss:
+            # Faint top highlight for a glassy look
+            gloss_layer = _Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            gd = _ImageDraw.Draw(gloss_layer)
+            gh = max(1, height // 2)
+            for y in range(gh):
+                a = int(70 * (1 - y / gh))
+                gd.line([(0, y), (width, y)], fill=(255, 255, 255, a))
+            img = _Image.alpha_composite(img, gloss_layer)
+        # Rounded-corner mask
+        mask = _Image.new("L", (width, height), 0)
+        _ImageDraw.Draw(mask).rounded_rectangle(
+            [0, 0, width - 1, height - 1], radius=radius, fill=255)
+        img.putalpha(mask)
+        if border_hex:
+            _ImageDraw.Draw(img).rounded_rectangle(
+                [0, 0, width - 1, height - 1], radius=radius,
+                outline=_hex_rgb(border_hex) + (255,), width=2)
+        cimg = ctk.CTkImage(light_image=img, dark_image=img, size=(width, height))
+        _GRADIENT_CACHE[key] = cimg
+        return cimg
+    except Exception as e:
+        print(f"Gradient generation failed: {e}")
+        return None
+
+
 class TVLibraryDialog(ctk.CTkToplevel):
     """MediaElch-style TV Library browser for managing multiple TV shows"""
     
@@ -10083,33 +10148,54 @@ class TVLibraryDialog(ctk.CTkToplevel):
         btn_text = f"{show['name']}{year_str}  •  {show['episode_count']} ep  [{nfo}{p}{f}{l}]"
         
         btn = ctk.CTkButton(
-            self.show_list, 
+            self.show_list,
             text=btn_text,
             anchor="w",
             fg_color=ParagonTheme.BG_TERTIARY,
             hover_color=ParagonTheme.BG_HOVER,
             font=ctk.CTkFont(family="Bebas Neue", size=22),
             height=48,
+            corner_radius=8,
             command=lambda s=show: self._on_show_click(s)
         )
         btn.pack(fill="x", pady=2)
         self.show_widgets[show['path']] = btn
-    
+
+    def _select_row_gradient(self, btn):
+        """Give a row the red→orange gradient highlight (falls back to flat red
+        if Pillow can't build the texture)."""
+        try:
+            w = btn.winfo_width()
+            if w < 10:
+                w = 360  # not laid out yet; use a sensible default
+            grad = make_paragon_gradient(w, 46, radius=8)
+            if grad is not None:
+                btn._grad_img = grad  # keep a ref so it isn't garbage-collected
+                btn.configure(image=grad, fg_color="transparent", compound="center")
+            else:
+                btn.configure(fg_color=ParagonTheme.RED_PRIMARY)
+        except Exception:
+            try:
+                btn.configure(fg_color=ParagonTheme.RED_PRIMARY)
+            except Exception:
+                pass
+
+    def _deselect_row(self, btn):
+        try:
+            btn._grad_img = None
+            btn.configure(image=None, fg_color=ParagonTheme.BG_TERTIARY)
+        except Exception:
+            pass
+
     def _on_show_click(self, show):
         # Update selection highlighting
         prev = getattr(self, '_prev_selected', None)
         if prev and prev in self.show_widgets:
-            try:
-                self.show_widgets[prev].configure(fg_color=ParagonTheme.BG_TERTIARY)
-            except:
-                pass
-        
+            self._deselect_row(self.show_widgets[prev])
+
         if show['path'] in self.show_widgets:
-            try:
-                self.show_widgets[show['path']].configure(fg_color=ParagonTheme.RED_PRIMARY)
-            except:
-                pass
-        
+            self._select_row_gradient(self.show_widgets[show['path']])
+
         self._prev_selected = show['path']
         
         # Clear right panel
