@@ -3582,30 +3582,20 @@ class ParagonButton(tk.Canvas):
             if w < 4 or h < 4:
                 return
             if self._gradient:
-                # White button with red→orange gradient TEXT
-                bg = make_gradient_photo(w, h, left_hex="#f6f6f6", right_hex="#f6f6f6",
-                                         radius=self._corner, gloss=False, border_hex="#ff6a00")
+                # Red→orange gradient background: darker by default, normal on hover
+                if self._hover:
+                    c1, c2 = "#d81d45", ParagonTheme.GOLD
+                else:
+                    c1, c2 = _lighten("#d81d45", 0.62), _lighten(ParagonTheme.GOLD, 0.62)
+                bg = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
+                                         radius=self._corner, gloss=True, border_hex="#ff8a3d")
                 if bg is not None:
                     self._photo = bg
                     self.create_image(0, 0, image=bg, anchor="nw")
                 else:
-                    self.create_rectangle(1, 1, w - 1, h - 1, fill="#f6f6f6", outline="#ff6a00")
-                txt = _strip_button_emoji(self._text)
-                if self._state == "disabled":
-                    self.create_text(w // 2, h // 2, text=txt,
-                                     fill=ParagonTheme.TEXT_DISABLED, font=self._font)
-                else:
-                    if self._hover:
-                        l, r = _lighten("#d81d45", 1.08), _lighten(ParagonTheme.GOLD, 1.06)
-                    else:
-                        l, r = "#d81d45", ParagonTheme.GOLD
-                    fpx = max(12, min(int(h * 0.46), 30))
-                    tph = make_gradient_text_photo(txt, fpx, l, r)
-                    if tph is not None:
-                        self._text_photo = tph
-                        self.create_image(w // 2, h // 2, image=tph, anchor="center")
-                    else:
-                        self.create_text(w // 2, h // 2, text=txt, fill="#d81d45", font=self._font)
+                    self.create_rectangle(1, 1, w - 1, h - 1, fill=c1, outline="#ff8a3d")
+                fill = ParagonTheme.TEXT_DISABLED if self._state == "disabled" else self._text_color
+                self.create_text(w // 2, h // 2, text=self._text, fill=fill, font=self._font)
             else:
                 # Flat fill (dark "secondary-styled" buttons)
                 base = (self._hover_color or _lighten(self._c1, 1.2)) if self._hover else self._c1
@@ -3801,23 +3791,200 @@ class ParagonRadioButton(ctk.CTkRadioButton):
         super().__init__(master, **defaults)
 
 
-class ParagonOptionMenu(ctk.CTkOptionMenu):
-    """Paragon-style dropdown menu"""
-    def __init__(self, master, **kwargs):
-        defaults = {
-            'fg_color': ParagonTheme.BG_TERTIARY,
-            'button_color': ParagonTheme.RED_DARK,
-            'button_hover_color': ParagonTheme.RED_PRIMARY,
-            'dropdown_fg_color': ParagonTheme.BG_TERTIARY,
-            'dropdown_hover_color': ParagonTheme.BG_HOVER,
-            'text_color': ParagonTheme.TEXT_PRIMARY,
-            'dropdown_text_color': ParagonTheme.TEXT_PRIMARY,
-            'corner_radius': 6,
-            'font': ctk.CTkFont(family="Segoe UI", size=18),
-            'height': 40,
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
+def _tk_font(font, default_size=16):
+    try:
+        if font is None:
+            return ("Segoe UI", default_size)
+        if isinstance(font, (tuple, list)):
+            return tuple(font)
+        fam = font.cget("family")
+        sz = int(font.cget("size"))
+        return (fam, max(10, min(sz, 18)))
+    except Exception:
+        return ("Segoe UI", default_size)
+
+
+class ParagonOptionMenu(tk.Canvas):
+    """Canvas-based dropdown with the Paragon red→orange gradient (darker by
+    default, normal on hover) and a native popup menu. CTk-compatible shim:
+    values=, command=, variable=, .set(), .get(), .configure()."""
+    def __init__(self, master, values=None, command=None, variable=None, **kwargs):
+        width = int(kwargs.pop('width', 160) or 160)
+        height = int(kwargs.pop('height', 40) or 40)
+        super().__init__(master, width=width, height=height,
+                         highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK)
+        self._values = list(values or [])
+        self._command = command
+        self._variable = variable
+        self._corner = int(kwargs.pop('corner_radius', 8) or 8)
+        self._font = _tk_font(kwargs.pop('font', None), 16)
+        self._state = kwargs.pop('state', 'normal')
+        self._hover = False
+        self._photo = None
+        if variable is not None:
+            self._value = variable.get() or (self._values[0] if self._values else "")
+            try:
+                variable.trace_add("write", lambda *a: self._on_var_change())
+            except Exception:
+                pass
+        else:
+            self._value = self._values[0] if self._values else ""
+        self._menu = tk.Menu(self, tearoff=0,
+                             bg=ParagonTheme.BG_TERTIARY, fg=ParagonTheme.TEXT_PRIMARY,
+                             activebackground=ParagonTheme.RED_PRIMARY,
+                             activeforeground="#ffffff",
+                             font=("Segoe UI", 12), bd=0, relief="flat")
+        self._build_menu()
+        try:
+            tk.Canvas.configure(self, cursor="hand2")
+        except Exception:
+            pass
+        self.bind("<Configure>", self._draw)
+        self.bind("<Button-1>", self._popup)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+
+    def _build_menu(self):
+        try:
+            self._menu.delete(0, "end")
+            for v in self._values:
+                self._menu.add_command(label=v, command=lambda val=v: self._select(val))
+        except Exception:
+            pass
+
+    def _draw(self, *_):
+        try:
+            self.delete("all")
+            w = self.winfo_width() or int(self["width"])
+            h = self.winfo_height() or int(self["height"])
+            if w < 4 or h < 4:
+                return
+            if self._hover and self._state != "disabled":
+                c1, c2 = "#d81d45", ParagonTheme.GOLD
+            else:
+                c1, c2 = _lighten("#d81d45", 0.62), _lighten(ParagonTheme.GOLD, 0.62)
+            bg = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
+                                     radius=self._corner, gloss=True, border_hex="#ff8a3d")
+            if bg is not None:
+                self._photo = bg
+                self.create_image(0, 0, image=bg, anchor="nw")
+            else:
+                self.create_rectangle(1, 1, w - 1, h - 1, fill=c1, outline="#ff8a3d")
+            fill = ParagonTheme.TEXT_DISABLED if self._state == "disabled" else "#ffffff"
+            self.create_text(12, h // 2, text=str(self._value), anchor="w",
+                             fill=fill, font=self._font)
+            self.create_text(w - 14, h // 2, text="▼", anchor="e",
+                             fill=fill, font=("Segoe UI", 12))
+        except Exception:
+            pass
+
+    def _popup(self, _=None):
+        if self._state == "disabled":
+            return
+        try:
+            self._menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+        finally:
+            try:
+                self._menu.grab_release()
+            except Exception:
+                pass
+
+    def _select(self, value):
+        self._value = value
+        if self._variable is not None:
+            try:
+                self._variable.set(value)
+            except Exception:
+                pass
+        self._draw()
+        if callable(self._command):
+            try:
+                self._command(value)
+            except Exception as e:
+                print(f"OptionMenu command error: {e}")
+
+    def _on_var_change(self):
+        try:
+            v = self._variable.get()
+            if v != self._value:
+                self._value = v
+                self._draw()
+        except Exception:
+            pass
+
+    def _on_enter(self, _):
+        if self._state == "disabled":
+            return
+        self._hover = True
+        self._draw()
+
+    def _on_leave(self, _):
+        self._hover = False
+        self._draw()
+
+    # --- CTk-compatible shims ---
+    def set(self, value):
+        self._value = value
+        if self._variable is not None:
+            try:
+                self._variable.set(value)
+            except Exception:
+                pass
+        self._draw()
+
+    def get(self):
+        return self._value
+
+    def configure(self, **kwargs):
+        redraw = False
+        if 'values' in kwargs:
+            self._values = list(kwargs.pop('values') or [])
+            self._build_menu(); redraw = True
+        if 'command' in kwargs:
+            self._command = kwargs.pop('command')
+        if 'variable' in kwargs:
+            self._variable = kwargs.pop('variable')
+        if 'state' in kwargs:
+            self._state = kwargs.pop('state'); redraw = True
+            try:
+                tk.Canvas.configure(self, cursor="arrow" if self._state == "disabled" else "hand2")
+            except Exception:
+                pass
+        if 'font' in kwargs:
+            self._font = _tk_font(kwargs.pop('font'), 16); redraw = True
+        if 'width' in kwargs:
+            try:
+                tk.Canvas.configure(self, width=int(kwargs.pop('width')))
+            except Exception:
+                kwargs.pop('width', None)
+            redraw = True
+        if 'height' in kwargs:
+            try:
+                tk.Canvas.configure(self, height=int(kwargs.pop('height')))
+            except Exception:
+                kwargs.pop('height', None)
+            redraw = True
+        for k in ('fg_color', 'button_color', 'button_hover_color', 'dropdown_fg_color',
+                  'dropdown_hover_color', 'text_color', 'dropdown_text_color',
+                  'corner_radius', 'hover_color', 'border_color', 'border_width'):
+            kwargs.pop(k, None)
+        if kwargs:
+            try:
+                tk.Canvas.configure(self, **kwargs)
+            except Exception:
+                pass
+        if redraw:
+            self._draw()
+    config = configure
+
+    def cget(self, key):
+        store = {'values': self._values, 'state': self._state, 'command': self._command}
+        if key in store:
+            return store[key]
+        try:
+            return tk.Canvas.cget(self, key)
+        except Exception:
+            return None
 
 
 class ParagonTabview(ctk.CTkTabview):
@@ -8649,13 +8816,11 @@ class MovieEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
-        ctk.CTkOptionMenu(cert_frame, variable=self.field_vars['certification'],
+        ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         fg_color=ParagonTheme.BG_DARK,
-                         button_color=ParagonTheme.RED_PRIMARY,
                          font=ctk.CTkFont(size=self.FONT_NORMAL),
-                         height=36).pack(side="left")
-        
+                         width=200, height=36).pack(side="left")
+
         self._add_field(scroll, "Trailer", "trailer")
         
         plot_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -13474,25 +13639,21 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['status'] = ctk.StringVar()
-        ctk.CTkOptionMenu(premiere_frame, variable=self.field_vars['status'],
+        ParagonOptionMenu(premiere_frame, variable=self.field_vars['status'],
                          values=["", "Continuing", "Ended", "Canceled", "In Production"],
-                         fg_color=ParagonTheme.BG_DARK,
-                         button_color=ParagonTheme.RED_PRIMARY,
                          font=ctk.CTkFont(size=self.FONT_NORMAL),
-                         height=36).pack(side="left")
-        
+                         width=200, height=36).pack(side="left")
+
         cert_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         cert_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(cert_frame, text="Certification", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
-        ctk.CTkOptionMenu(cert_frame, variable=self.field_vars['certification'],
+        ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         fg_color=ParagonTheme.BG_DARK,
-                         button_color=ParagonTheme.RED_PRIMARY,
                          font=ctk.CTkFont(size=self.FONT_NORMAL),
-                         height=36).pack(side="left")
+                         width=200, height=36).pack(side="left")
         
         self._add_field(scroll, "Network", "studio")
         
@@ -14813,13 +14974,11 @@ if HAS_DND:
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
-        ctk.CTkOptionMenu(cert_frame, variable=self.field_vars['certification'],
+        ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         fg_color=ParagonTheme.BG_DARK,
-                         button_color=ParagonTheme.RED_PRIMARY,
                          font=ctk.CTkFont(size=self.FONT_NORMAL),
-                         height=36).pack(side="left")
-        
+                         width=200, height=36).pack(side="left")
+
         # Network/Studio
         self._add_field(scroll, "Network", "studio")
         
