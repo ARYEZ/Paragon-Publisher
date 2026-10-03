@@ -4086,6 +4086,56 @@ class ParagonGradientTabview(ctk.CTkFrame):
         return self._current
 
 
+class GradientBorder(tk.Canvas):
+    """A thin canvas that paints the Paragon pink→orange gradient as a rounded
+    border. A single child widget is placed on top, inset by `bw` pixels, so the
+    gradient shows only as a border frame around it."""
+    def __init__(self, master, bw=2, radius=6, height=36, width=200, **kw):
+        super().__init__(master, highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK,
+                         height=height, width=width, **kw)
+        self._bw = bw
+        self._radius = radius
+        self._photo = None
+        self.bind("<Configure>", self._redraw)
+
+    def attach(self, child):
+        bw = self._bw
+        child.place(x=bw, y=bw, relwidth=1.0, relheight=1.0,
+                    width=-2 * bw, height=-2 * bw)
+        return child
+
+    def _redraw(self, *_):
+        try:
+            self.delete("all")
+            w = self.winfo_width() or int(self['width'])
+            h = self.winfo_height() or int(self['height'])
+            if w < 4 or h < 4:
+                return
+            photo = make_gradient_photo(w, h, left_hex="#d81d45",
+                                        right_hex=ParagonTheme.GOLD,
+                                        radius=self._radius, gloss=False, border_hex=None)
+            if photo is not None:
+                self._photo = photo
+                self.create_image(0, 0, image=photo, anchor="nw")
+            else:
+                self.create_rectangle(1, 1, w - 1, h - 1, outline=ParagonTheme.GOLD)
+        except Exception:
+            pass
+
+
+def make_grad_entry(parent, *, width=None, height=36, textvariable=None,
+                    placeholder_text="", font=None, bw=2):
+    """Create a CTkEntry wrapped in a Paragon gradient border. Returns the
+    GradientBorder box (pack/grid it) and the inner entry."""
+    box_w = (int(width) + 2 * bw) if width else 200
+    box = GradientBorder(parent, bw=bw, height=height, width=box_w)
+    entry = ctk.CTkEntry(box, textvariable=textvariable, placeholder_text=placeholder_text,
+                         fg_color=ParagonTheme.BG_DARK, border_width=0, corner_radius=4,
+                         font=font or ctk.CTkFont(size=16))
+    box.attach(entry)
+    return box, entry
+
+
 class ParagonProgressBar(ctk.CTkProgressBar):
     """Paragon-style progress bar"""
     def __init__(self, master, **kwargs):
@@ -13388,8 +13438,8 @@ class TVEditorDialog(ctk.CTkToplevel):
                             pass
                     # Create new label
                     self.ep_thumb_label = ctk.CTkLabel(
-                        self.ep_thumb_frame, 
-                        text=text if text else "Episode Thumbnail",
+                        self.ep_thumb_frame,
+                        text=text,
                         image=image,
                         text_color=ParagonTheme.TEXT_SECONDARY,
                         font=ctk.CTkFont(size=12)
@@ -13945,7 +13995,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         self.ep_thumb_frame = ctk.CTkFrame(thumb_container, fg_color=ParagonTheme.BG_DARK, width=280, height=160, corner_radius=6)
         self.ep_thumb_frame.pack()
         self.ep_thumb_frame.pack_propagate(False)
-        self.ep_thumb_label = ctk.CTkLabel(self.ep_thumb_frame, text="Episode Thumbnail\n(Auto-loads from TMDB)",
+        self.ep_thumb_label = ctk.CTkLabel(self.ep_thumb_frame, text="",
                                            text_color=ParagonTheme.TEXT_SECONDARY,
                                            font=ctk.CTkFont(size=12))
         self.ep_thumb_label.pack(expand=True)
@@ -13982,12 +14032,12 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(file_frame, text="File", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
-        # Framed box around the filename so it matches the other fields
-        file_box = ctk.CTkFrame(file_frame, fg_color=ParagonTheme.BG_DARK, corner_radius=6,
-                                border_color=ParagonTheme.BORDER_DARK, border_width=1, height=36)
+        # Gradient-bordered box around the filename so it matches the fields
+        file_box = GradientBorder(file_frame, bw=2, height=36)
         file_box.pack(side="left", fill="x", expand=True)
-        file_box.pack_propagate(False)
-        self.ep_file_label = ctk.CTkLabel(file_box, text="Select an episode", anchor="w",
+        inner_file = ctk.CTkFrame(file_box, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
+        file_box.attach(inner_file)
+        self.ep_file_label = ctk.CTkLabel(inner_file, text="Select an episode", anchor="w",
                                           text_color=ParagonTheme.TEXT_PRIMARY,
                                           font=ctk.CTkFont(size=self.FONT_NORMAL))
         self.ep_file_label.pack(side="left", fill="x", expand=True, padx=10)
@@ -14000,17 +14050,15 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_season'] = ctk.StringVar()
-        ctk.CTkEntry(se_frame, textvariable=self.episode_field_vars['ep_season'], width=80,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left", padx=(0, 20))
-        
+        make_grad_entry(se_frame, width=80, textvariable=self.episode_field_vars['ep_season'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
+
         ctk.CTkLabel(se_frame, text="Episode", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_episode'] = ctk.StringVar()
-        ctk.CTkEntry(se_frame, textvariable=self.episode_field_vars['ep_episode'], width=80,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left")
+        make_grad_entry(se_frame, width=80, textvariable=self.episode_field_vars['ep_episode'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
         
         # Title
         title_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14019,9 +14067,8 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_title'] = ctk.StringVar()
-        ctk.CTkEntry(title_frame, textvariable=self.episode_field_vars['ep_title'],
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left", fill="x", expand=True)
+        make_grad_entry(title_frame, textvariable=self.episode_field_vars['ep_title'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", fill="x", expand=True)
         
         # Aired date and rating
         aired_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14031,17 +14078,15 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_aired'] = ctk.StringVar()
-        ctk.CTkEntry(aired_frame, textvariable=self.episode_field_vars['ep_aired'], width=130,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left", padx=(0, 20))
-        
+        make_grad_entry(aired_frame, width=130, textvariable=self.episode_field_vars['ep_aired'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
+
         ctk.CTkLabel(aired_frame, text="Rating", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_rating'] = ctk.StringVar()
-        ctk.CTkEntry(aired_frame, textvariable=self.episode_field_vars['ep_rating'], width=80,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left")
+        make_grad_entry(aired_frame, width=80, textvariable=self.episode_field_vars['ep_rating'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
         
         # Plot
         plot_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14049,9 +14094,12 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
-        self.ep_plot_text = ctk.CTkTextbox(plot_frame, height=100, fg_color=ParagonTheme.BG_DARK,
+        plot_box = GradientBorder(plot_frame, bw=2, height=100)
+        plot_box.pack(side="left", fill="x", expand=True)
+        self.ep_plot_text = ctk.CTkTextbox(plot_box, fg_color=ParagonTheme.BG_DARK,
+                                           border_width=0, corner_radius=4,
                                            font=ctk.CTkFont(size=self.FONT_NORMAL))
-        self.ep_plot_text.pack(side="left", fill="x", expand=True)
+        plot_box.attach(self.ep_plot_text)
         
         # Runtime and User Rating row
         runtime_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14061,20 +14109,17 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_runtime'] = ctk.StringVar()
-        runtime_entry = ctk.CTkEntry(runtime_frame, textvariable=self.episode_field_vars['ep_runtime'], width=80,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36)
-        runtime_entry.pack(side="left")
+        make_grad_entry(runtime_frame, width=80, textvariable=self.episode_field_vars['ep_runtime'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
         ctk.CTkLabel(runtime_frame, text="min", text_color=ParagonTheme.TEXT_MUTED,
                     font=ctk.CTkFont(size=self.FONT_SMALL)).pack(side="left", padx=(5, 20))
-        
+
         ctk.CTkLabel(runtime_frame, text="User Rating", width=100, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_userrating'] = ctk.StringVar()
-        ctk.CTkEntry(runtime_frame, textvariable=self.episode_field_vars['ep_userrating'], width=60,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36).pack(side="left")
+        make_grad_entry(runtime_frame, width=60, textvariable=self.episode_field_vars['ep_userrating'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
         ctk.CTkLabel(runtime_frame, text="/10", text_color=ParagonTheme.TEXT_MUTED,
                     font=ctk.CTkFont(size=self.FONT_SMALL)).pack(side="left", padx=(5, 0))
         
@@ -14085,9 +14130,9 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_directors'] = ctk.StringVar()
-        ctk.CTkEntry(directors_frame, textvariable=self.episode_field_vars['ep_directors'],
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36, placeholder_text="Comma-separated names").pack(side="left", fill="x", expand=True)
+        make_grad_entry(directors_frame, textvariable=self.episode_field_vars['ep_directors'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
         # Writers
         writers_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14096,9 +14141,9 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_writers'] = ctk.StringVar()
-        ctk.CTkEntry(writers_frame, textvariable=self.episode_field_vars['ep_writers'],
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36, placeholder_text="Comma-separated names").pack(side="left", fill="x", expand=True)
+        make_grad_entry(writers_frame, textvariable=self.episode_field_vars['ep_writers'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
         # Guest Stars
         guests_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14107,9 +14152,9 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_guests'] = ctk.StringVar()
-        ctk.CTkEntry(guests_frame, textvariable=self.episode_field_vars['ep_guests'],
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
-                    height=36, placeholder_text="Comma-separated names").pack(side="left", fill="x", expand=True)
+        make_grad_entry(guests_frame, textvariable=self.episode_field_vars['ep_guests'],
+                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
     def _manual_fetch_episode(self):
         """Manually fetch episode data from TMDB"""
