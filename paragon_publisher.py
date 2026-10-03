@@ -4044,17 +4044,20 @@ class ParagonGradientTabview(ctk.CTkFrame):
         self._current = None
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._header.pack(fill="x", padx=4, pady=(4, 6))
+        # Inner holder that shrinks to its buttons so the row centers.
+        self._btnrow = ctk.CTkFrame(self._header, fg_color="transparent")
+        self._btnrow.pack(anchor="center")
         self._body = ctk.CTkFrame(self, fg_color="transparent")
         self._body.pack(fill="both", expand=True)
 
     def add(self, name):
         if name in self._frames:
             return self._frames[name]
-        btn = ParagonButton(self._header, text=name, fg_color=ParagonTheme.RED_PRIMARY,
+        btn = ParagonButton(self._btnrow, text=name, fg_color=ParagonTheme.RED_PRIMARY,
                             width=170, height=40, corner_radius=8,
                             font=ctk.CTkFont(family="Bebas Neue", size=20),
                             command=lambda n=name: self.set(n))
-        btn.pack(side="left", padx=(0, 6))
+        btn.pack(side="left", padx=4)
         frame = ctk.CTkFrame(self._body, fg_color="transparent")
         self._names.append(name)
         self._buttons[name] = btn
@@ -13104,6 +13107,14 @@ class TVEditorDialog(ctk.CTkToplevel):
             row.bind("<Configure>", lambda e, r=row: self._draw_episode_row(r))
             self.episode_widgets[f] = row
 
+        # Auto-select: keep the current episode if it still exists, otherwise
+        # select the first one so the editor opens on an episode (not blank).
+        sel = getattr(self, '_selected_episode_file', None)
+        if sel in self.episode_widgets:
+            self._select_episode(sel)
+        elif sorted_files:
+            self._select_episode(sorted_files[0])
+
     def _draw_episode_row(self, row):
         try:
             row.delete("all")
@@ -14226,9 +14237,10 @@ class TVEditorDialog(ctk.CTkToplevel):
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Video", style="header").pack(anchor="w", pady=(0, 8))
-        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6,
+                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         video_frame.pack(fill="x", pady=(0, 20))
-        
+
         self.ep_video_info_labels = {}
         for field in ["Codec", "Resolution", "Aspect Ratio", "Scantype", "Duration"]:
             row = ctk.CTkFrame(video_frame, fg_color="transparent")
@@ -14242,13 +14254,15 @@ class TVEditorDialog(ctk.CTkToplevel):
             self.ep_video_info_labels[field.lower().replace(" ", "_")] = lbl
         
         ParagonLabel(scroll, text="Audio", style="header").pack(anchor="w", pady=(15, 8))
-        self.ep_audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.ep_audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6,
+                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.ep_audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.ep_audio_frame, text="Select an episode", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
-        self.ep_subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.ep_subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6,
+                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.ep_subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.ep_subs_frame, text="Select an episode", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
