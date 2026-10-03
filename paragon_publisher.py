@@ -4088,37 +4088,48 @@ class ParagonGradientTabview(ctk.CTkFrame):
 
 class GradientBorder(tk.Canvas):
     """A thin canvas that paints the Paragon pink→orange gradient as a rounded
-    border. A single child widget is placed on top, inset by `bw` pixels, so the
-    gradient shows only as a border frame around it."""
+    border. A single child widget is embedded on top, inset by `bw` pixels, so
+    the gradient shows only as a border frame around it. The child is embedded
+    via a canvas window (not place) because CTk widgets reject width/height in
+    place()."""
     def __init__(self, master, bw=2, radius=6, height=36, width=200, **kw):
         super().__init__(master, highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK,
                          height=height, width=width, **kw)
         self._bw = bw
         self._radius = radius
         self._photo = None
+        self._win = None
+        self._child = None
         self.bind("<Configure>", self._redraw)
 
     def attach(self, child):
-        bw = self._bw
-        child.place(x=bw, y=bw, relwidth=1.0, relheight=1.0,
-                    width=-2 * bw, height=-2 * bw)
+        self._child = child
+        self._win = self.create_window(self._bw, self._bw, window=child, anchor="nw")
+        self._redraw()
         return child
 
     def _redraw(self, *_):
         try:
-            self.delete("all")
             w = self.winfo_width() or int(self['width'])
             h = self.winfo_height() or int(self['height'])
             if w < 4 or h < 4:
                 return
+            self.delete("grad")
             photo = make_gradient_photo(w, h, left_hex="#d81d45",
                                         right_hex=ParagonTheme.GOLD,
                                         radius=self._radius, gloss=False, border_hex=None)
             if photo is not None:
                 self._photo = photo
-                self.create_image(0, 0, image=photo, anchor="nw")
+                self.create_image(0, 0, image=photo, anchor="nw", tags="grad")
             else:
-                self.create_rectangle(1, 1, w - 1, h - 1, outline=ParagonTheme.GOLD)
+                self.create_rectangle(1, 1, w - 1, h - 1, outline=ParagonTheme.GOLD,
+                                      tags="grad")
+            self.tag_lower("grad")  # keep the gradient behind the embedded child
+            if self._win is not None:
+                bw = self._bw
+                self.coords(self._win, bw, bw)
+                self.itemconfigure(self._win, width=max(1, w - 2 * bw),
+                                   height=max(1, h - 2 * bw))
         except Exception:
             pass
 
