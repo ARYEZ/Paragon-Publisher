@@ -10836,16 +10836,22 @@ class TVLibraryDialog(ctk.CTkToplevel):
                 self.shows[i] = new_info
                 break
         
-        # Update the button text
+        # Update the row-card's data and repaint
         if old_show['path'] in self.show_widgets:
-            btn = self.show_widgets[old_show['path']]
+            row = self.show_widgets[old_show['path']]
             year_str = f" ({new_info['year']})" if new_info.get('year') else ""
             nfo = "✓" if new_info['has_nfo'] else "✗"
             p = "P" if new_info['has_poster'] else "-"
             f = "F" if new_info['has_fanart'] else "-"
             l = "L" if new_info['has_logo'] else "-"
-            btn_text = f"{new_info['name']}{year_str}  •  {new_info['episode_count']} ep  [{nfo}{p}{f}{l}]"
-            btn.configure(text=btn_text)
+            try:
+                row._show = new_info
+                row._year = year_str
+                row._flags = f"[{nfo}{p}{f}{l}]"
+                row.bind("<Button-1>", lambda e, s=new_info: self._on_show_click(s))
+                self._draw_show_row(row)
+            except Exception:
+                pass
         
         # Update cache
         self._save_caches()
@@ -11227,57 +11233,55 @@ class FileLibraryDialog(ctk.CTkToplevel):
             self._create_file_entry(i, f)
     
     def _create_file_entry(self, index: int, file_info: Dict):
-        """Create a file entry in the list"""
-        is_selected = file_info['path'] in self.selected_files
-        bg_color = ParagonTheme.RED_PRIMARY if is_selected else ParagonTheme.BG_TERTIARY
-        
-        frame = ctk.CTkFrame(self.file_list, fg_color=bg_color, corner_radius=4)
-        frame.pack(fill="x", pady=1)
-        frame.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        inner = ctk.CTkFrame(frame, fg_color="transparent")
-        inner.pack(fill="x", padx=10, pady=4)
-        inner.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        # Checkbox
-        var = ctk.BooleanVar(value=is_selected)
-        cb = ctk.CTkCheckBox(inner, text="", variable=var, width=20,
-                            fg_color=ParagonTheme.RED_PRIMARY,
-                            command=lambda f=file_info: self._toggle_file_selection(f))
-        cb.pack(side="left", padx=(0, 10))
-        
-        # Icon
-        icon_lbl = ctk.CTkLabel(inner, text=file_info['icon'],
-                               font=ctk.CTkFont(size=16), width=25)
-        icon_lbl.pack(side="left")
-        icon_lbl.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        # Filename
-        name_lbl = ctk.CTkLabel(inner, text=file_info['name'],
-                               font=ctk.CTkFont(size=14),
-                               text_color=ParagonTheme.TEXT_PRIMARY,
-                               anchor="w")
-        name_lbl.pack(side="left", fill="x", expand=True, padx=(5, 10))
-        name_lbl.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        # Size
-        size_lbl = ctk.CTkLabel(inner, text=file_info['size_str'],
-                               font=ctk.CTkFont(size=12),
-                               text_color=ParagonTheme.TEXT_MUTED,
-                               width=80)
-        size_lbl.pack(side="right")
-        size_lbl.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        # Extension
-        ext_lbl = ctk.CTkLabel(inner, text=file_info['ext'],
-                              font=ctk.CTkFont(size=12),
-                              text_color=ParagonTheme.TEXT_MUTED,
-                              width=60)
-        ext_lbl.pack(side="right")
-        ext_lbl.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
-        
-        self.file_widgets[file_info['path']] = (frame, var)
-    
+        """Create a file entry as a Canvas card (gradient when selected)."""
+        row = tk.Canvas(self.file_list, height=36, highlightthickness=0, bd=0,
+                        bg=ParagonTheme.BG_DARK)
+        row.pack(fill="x", pady=1)
+        row._file = file_info
+        row._photo = None
+        row.bind("<Button-1>", lambda e, f=file_info: self._toggle_file_selection(f))
+        row.bind("<Configure>", lambda e, r=row: self._draw_file_row(r))
+        self.file_widgets[file_info['path']] = row
+
+    def _draw_file_row(self, row):
+        try:
+            fi = row._file
+            row.delete("all")
+            w = row.winfo_width() or 400
+            h = 36
+            selected = fi['path'] in self.selected_files
+            if selected:
+                photo = make_gradient_photo(max(2, w - 4), h - 4, radius=6)
+                if photo is not None:
+                    row._photo = photo
+                    row.create_image(2, 2, image=photo, anchor="nw")
+                else:
+                    row.create_rectangle(2, 2, w - 2, h - 2,
+                                         fill=ParagonTheme.RED_PRIMARY, outline="")
+                fg, mut, box = "#ffffff", "#ffe8d8", "#ffffff"
+            else:
+                row._photo = None
+                row.create_rectangle(2, 2, w - 2, h - 2,
+                                     fill=ParagonTheme.BG_TERTIARY,
+                                     outline=ParagonTheme.BORDER_DARK)
+                fg, mut, box = ParagonTheme.TEXT_PRIMARY, ParagonTheme.TEXT_MUTED, ParagonTheme.TEXT_MUTED
+            cy = h // 2
+            bs = 14
+            cx1 = 12
+            row.create_rectangle(cx1, cy - bs // 2, cx1 + bs, cy + bs // 2,
+                                 outline=box, width=2)
+            if selected:
+                row.create_text(cx1 + bs // 2 + 1, cy, text="✓", fill="#ffffff",
+                                font=("Segoe UI", 11))
+            row.create_text(cx1 + bs + 12, cy, text=fi.get('icon', ''), anchor="w",
+                            fill=fg, font=("Segoe UI", 13))
+            row.create_text(cx1 + bs + 36, cy, text=fi['name'], anchor="w",
+                            fill=fg, font=("Segoe UI", 12))
+            row.create_text(w - 14, cy, text=f"{fi.get('ext', '')}   {fi.get('size_str', '')}",
+                            anchor="e", fill=mut, font=("Segoe UI", 11))
+        except Exception:
+            pass
+
     def _toggle_file_selection(self, file_info: Dict):
         """Toggle selection for a file"""
         path = file_info['path']
@@ -11285,14 +11289,10 @@ class FileLibraryDialog(ctk.CTkToplevel):
             self.selected_files.remove(path)
         else:
             self.selected_files.add(path)
-        
-        # Update UI
+
         if path in self.file_widgets:
-            frame, var = self.file_widgets[path]
-            is_selected = path in self.selected_files
-            var.set(is_selected)
-            frame.configure(fg_color=ParagonTheme.RED_PRIMARY if is_selected else ParagonTheme.BG_TERTIARY)
-        
+            self._draw_file_row(self.file_widgets[path])
+
         self._update_selected_count()
     
     def _update_selected_count(self):
@@ -11648,46 +11648,69 @@ class MovieLibraryDialog(ctk.CTkToplevel):
             self._create_movie_entry(movie)
     
     def _create_movie_entry(self, movie: Dict):
-        """Create a movie entry - simple button approach like TV Library"""
+        """Create a movie entry as a Canvas gradient card (like TV Library)."""
         year_str = f" ({movie['year']})" if movie.get('year') else ""
-        
-        # Status indicators as text
         nfo = "✓" if movie['has_nfo'] else "✗"
         p = "P" if movie['has_poster'] else "-"
         f = "F" if movie['has_fanart'] else "-"
         l = "L" if movie['has_logo'] else "-"
-        
-        btn_text = f"{movie['name']}{year_str}  [{nfo}{p}{f}{l}]"
-        
-        btn = ctk.CTkButton(
-            self.movie_list, 
-            text=btn_text,
-            anchor="w",
-            fg_color=ParagonTheme.BG_TERTIARY,
-            hover_color=ParagonTheme.BG_HOVER,
-            font=ctk.CTkFont(family="Bebas Neue", size=22),
-            height=48,
-            command=lambda m=movie: self._select_movie(m)
-        )
-        btn.pack(fill="x", pady=2)
-        self.movie_widgets[movie['path']] = btn
-    
+
+        row = tk.Canvas(self.movie_list, height=50, highlightthickness=0, bd=0,
+                        bg=ParagonTheme.BG_DARK)
+        row.pack(fill="x", pady=2)
+        row._movie = movie
+        row._year = year_str
+        row._flags = f"[{nfo}{p}{f}{l}]"
+        row._selected = False
+        row._photo = None
+        row.bind("<Button-1>", lambda e, m=movie: self._select_movie(m))
+        row.bind("<Configure>", lambda e, r=row: self._draw_movie_row(r))
+        self.movie_widgets[movie['path']] = row
+
+    def _draw_movie_row(self, row):
+        try:
+            movie = row._movie
+            row.delete("all")
+            w = row.winfo_width() or 360
+            h = 50
+            if row._selected:
+                photo = make_gradient_photo(max(2, w - 4), h - 6, radius=8)
+                if photo is not None:
+                    row._photo = photo
+                    row.create_image(2, 3, image=photo, anchor="nw")
+                else:
+                    row.create_rectangle(2, 3, w - 2, h - 3,
+                                         fill=ParagonTheme.RED_PRIMARY, outline="")
+                name_fill = "#ffffff"
+                badge_fill = "#ffffff"
+            else:
+                row._photo = None
+                row.create_rectangle(2, 3, w - 2, h - 3,
+                                     fill=ParagonTheme.BG_TERTIARY,
+                                     outline=ParagonTheme.BORDER_DARK)
+                name_fill = ParagonTheme.TEXT_PRIMARY
+                badge_fill = ParagonTheme.TEXT_MUTED
+            row.create_text(16, h // 2, text=f"{movie['name']}{row._year}",
+                            anchor="w", fill=name_fill, font=("Bebas Neue", 16))
+            row.create_text(w - 16, h // 2, text=row._flags, anchor="e",
+                            fill=badge_fill, font=("Bebas Neue", 14))
+        except Exception:
+            pass
+
     def _select_movie(self, movie: Dict):
         """Select a movie and show its details"""
         # Update selection highlighting
         prev = getattr(self, '_prev_selected', None)
-        if prev and prev in self.movie_widgets:
-            try:
-                self.movie_widgets[prev].configure(fg_color=ParagonTheme.BG_TERTIARY)
-            except:
-                pass
-        
+        if prev and prev in self.movie_widgets and prev != movie['path']:
+            pr = self.movie_widgets[prev]
+            pr._selected = False
+            self._draw_movie_row(pr)
+
         if movie['path'] in self.movie_widgets:
-            try:
-                self.movie_widgets[movie['path']].configure(fg_color=ParagonTheme.RED_PRIMARY)
-            except:
-                pass
-        
+            cr = self.movie_widgets[movie['path']]
+            cr._selected = True
+            self._draw_movie_row(cr)
+
         self._prev_selected = movie['path']
         self.selected_movie = movie
         
@@ -11706,24 +11729,25 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         
         year_str = f" ({movie['year']})" if movie.get('year') else ""
         ctk.CTkLabel(header, text=f"{movie['name']}{year_str}",
-                    font=ctk.CTkFont(family="Bebas Neue", size=36),
+                    font=ctk.CTkFont(family="Bebas Neue", size=54),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        
+
         # Open full editor button
-        ParagonButton(header, text="📝 OPEN FULL EDITOR", 
+        ParagonButton(header, text="📝 OPEN FULL EDITOR",
                      command=lambda: self._open_full_editor(movie),
-                     width=200, height=44).pack(side="right")
-        
+                     width=240, height=52).pack(side="right")
+
         # Info section
         info_frame = ctk.CTkFrame(self.right_panel, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
         info_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+
         info_inner = ctk.CTkFrame(info_frame, fg_color="transparent")
         info_inner.pack(fill="x", padx=15, pady=15)
-        
-        # Poster placeholder - will be replaced async
-        poster_frame = ctk.CTkFrame(info_inner, fg_color=ParagonTheme.BG_TERTIARY, width=120, height=180, corner_radius=6)
-        poster_frame.pack(side="left", padx=(0, 20))
+
+        # Poster placeholder - will be replaced async (large, uses the space)
+        poster_frame = ctk.CTkFrame(info_inner, fg_color=ParagonTheme.BG_TERTIARY, width=300, height=450, corner_radius=6,
+                                    border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        poster_frame.pack(side="left", padx=(0, 25))
         poster_frame.pack_propagate(False)
         
         self._poster_label = ctk.CTkLabel(poster_frame, text="Loading...", 
@@ -11740,14 +11764,15 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         info_text.pack(side="left", fill="both", expand=True)
         
         ctk.CTkLabel(info_text, text=f"Path: {movie['path']}",
-                    font=ctk.CTkFont(size=16),
+                    font=ctk.CTkFont(family="Bebas Neue", size=26),
                     text_color=ParagonTheme.TEXT_MUTED,
-                    wraplength=600, anchor="w", justify="left").pack(anchor="w")
-        
+                    wraplength=900, anchor="w", justify="left").pack(anchor="w", pady=(4, 0))
+
         if movie.get('video_file'):
             ctk.CTkLabel(info_text, text=f"File: {os.path.basename(movie['video_file'])}",
-                        font=ctk.CTkFont(size=16),
-                        text_color=ParagonTheme.TEXT_MUTED).pack(anchor="w", pady=(5, 0))
+                        font=ctk.CTkFont(family="Bebas Neue", size=24),
+                        text_color=ParagonTheme.TEXT_MUTED,
+                        wraplength=900, anchor="w", justify="left").pack(anchor="w", pady=(6, 0))
         
         status_parts = []
         if movie['has_nfo']:
@@ -11761,9 +11786,9 @@ class MovieLibraryDialog(ctk.CTkToplevel):
             status_parts.append(f"IMDB: {movie['imdb_id']}")
         
         ctk.CTkLabel(info_text, text=" | ".join(status_parts),
-                    font=ctk.CTkFont(size=18),
-                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(8, 0))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=30),
+                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(14, 0))
+
         # Artwork status
         artwork_status = []
         if movie['has_poster']: artwork_status.append("✓ Poster")
@@ -11772,17 +11797,17 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         else: artwork_status.append("✗ Fanart")
         if movie['has_logo']: artwork_status.append("✓ Logo")
         else: artwork_status.append("✗ Logo")
-        
+
         ctk.CTkLabel(info_text, text=" | ".join(artwork_status),
-                    font=ctk.CTkFont(size=18),
-                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(4, 0))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=30),
+                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(8, 0))
+
         # Quick actions section
         actions_header = ctk.CTkFrame(self.right_panel, fg_color="transparent")
-        actions_header.pack(fill="x", padx=15, pady=(20, 10))
-        
+        actions_header.pack(fill="x", padx=15, pady=(24, 12))
+
         ctk.CTkLabel(actions_header, text="QUICK ACTIONS",
-                    font=ctk.CTkFont(family="Bebas Neue", size=28),
+                    font=ctk.CTkFont(family="Bebas Neue", size=38),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
         
         actions_frame = ctk.CTkFrame(self.right_panel, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
@@ -11814,7 +11839,7 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         def load():
             try:
                 img = Image.open(poster_path)
-                img.thumbnail((120, 180), Image.Resampling.LANCZOS)
+                img.thumbnail((300, 450), Image.Resampling.LANCZOS)
                 # Schedule UI update on main thread
                 self.after(0, lambda: self._update_poster(img, poster_frame))
             except Exception as e:
@@ -11907,16 +11932,22 @@ class MovieLibraryDialog(ctk.CTkToplevel):
                 self.movies[i] = new_info
                 break
         
-        # Update the button text
+        # Update the row-card's data and repaint
         if old_movie['path'] in self.movie_widgets:
-            btn = self.movie_widgets[old_movie['path']]
+            row = self.movie_widgets[old_movie['path']]
             year_str = f" ({new_info['year']})" if new_info.get('year') else ""
             nfo = "✓" if new_info['has_nfo'] else "✗"
             p = "P" if new_info['has_poster'] else "-"
             f = "F" if new_info['has_fanart'] else "-"
             l = "L" if new_info['has_logo'] else "-"
-            btn_text = f"{new_info['name']}{year_str}  [{nfo}{p}{f}{l}]"
-            btn.configure(text=btn_text)
+            try:
+                row._movie = new_info
+                row._year = year_str
+                row._flags = f"[{nfo}{p}{f}{l}]"
+                row.bind("<Button-1>", lambda e, m=new_info: self._select_movie(m))
+                self._draw_movie_row(row)
+            except Exception:
+                pass
         
         # Update cache
         self._save_caches()
@@ -12280,43 +12311,65 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         for artist in artists:
             self._create_artist_entry(artist)
     
+    def _draw_music_row(self, row):
+        """Paint a two-line music row-card (artist or album) with the gradient
+        background when selected."""
+        try:
+            row.delete("all")
+            w = row.winfo_width() or 300
+            h = 58
+            if row._selected:
+                photo = make_gradient_photo(max(2, w - 4), h - 6, radius=8)
+                if photo is not None:
+                    row._photo = photo
+                    row.create_image(2, 3, image=photo, anchor="nw")
+                else:
+                    row.create_rectangle(2, 3, w - 2, h - 3,
+                                         fill=ParagonTheme.RED_PRIMARY, outline="")
+                c1 = c2 = "#ffffff"
+            else:
+                row._photo = None
+                row.create_rectangle(2, 3, w - 2, h - 3,
+                                     fill=ParagonTheme.BG_TERTIARY,
+                                     outline=ParagonTheme.BORDER_DARK)
+                c1 = ParagonTheme.TEXT_PRIMARY
+                c2 = ParagonTheme.TEXT_MUTED
+            row.create_text(14, 21, text=row._line1, anchor="w", fill=c1,
+                            font=("Bebas Neue", 17))
+            row.create_text(14, 41, text=row._line2, anchor="w", fill=c2,
+                            font=("Segoe UI", 11))
+            badge = getattr(row, "_badge", None)
+            if badge:
+                bt, bc = badge
+                bx2, bx1 = w - 12, w - 50
+                by1, by2 = h // 2 - 9, h // 2 + 9
+                row.create_rectangle(bx1, by1, bx2, by2, fill=bc, outline="")
+                row.create_text((bx1 + bx2) // 2, h // 2, text=bt,
+                                fill="#ffffff", font=("Segoe UI", 9))
+        except Exception:
+            pass
+
     def _create_artist_entry(self, artist: Dict):
-        """Create an artist entry in the list"""
-        frame = ctk.CTkFrame(self.artist_list, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6)
-        frame.pack(fill="x", pady=2)
-        frame.bind("<Button-1>", lambda e, a=artist: self._select_artist(a))
-        
-        inner = ctk.CTkFrame(frame, fg_color="transparent")
-        inner.pack(fill="x", padx=10, pady=6)
-        inner.bind("<Button-1>", lambda e, a=artist: self._select_artist(a))
-        
-        # Artist name
-        name_lbl = ctk.CTkLabel(inner, text=artist['name'],
-                               font=ctk.CTkFont(size=16, weight="bold"),
-                               text_color=ParagonTheme.TEXT_PRIMARY,
-                               anchor="w")
-        name_lbl.pack(fill="x")
-        name_lbl.bind("<Button-1>", lambda e, a=artist: self._select_artist(a))
-        
-        # Album/track count
-        info_text = f"{artist['album_count']} albums • {artist['track_count']} tracks"
-        info_lbl = ctk.CTkLabel(inner, text=info_text,
-                               font=ctk.CTkFont(size=12),
-                               text_color=ParagonTheme.TEXT_MUTED,
-                               anchor="w")
-        info_lbl.pack(fill="x")
-        info_lbl.bind("<Button-1>", lambda e, a=artist: self._select_artist(a))
-        
-        self.artist_widgets[artist['path']] = frame
-    
+        """Create an artist entry as a two-line gradient Canvas card."""
+        row = tk.Canvas(self.artist_list, height=58, highlightthickness=0, bd=0,
+                        bg=ParagonTheme.BG_DARK)
+        row.pack(fill="x", pady=2)
+        row._artist = artist
+        row._line1 = artist['name']
+        row._line2 = f"{artist['album_count']} albums • {artist['track_count']} tracks"
+        row._badge = None
+        row._selected = False
+        row._photo = None
+        row.bind("<Button-1>", lambda e, a=artist: self._select_artist(a))
+        row.bind("<Configure>", lambda e, r=row: self._draw_music_row(r))
+        self.artist_widgets[artist['path']] = row
+
     def _select_artist(self, artist: Dict):
         """Select an artist and show their albums"""
         # Update selection highlight
         for path, widget in self.artist_widgets.items():
-            if path == artist['path']:
-                widget.configure(fg_color=ParagonTheme.RED_PRIMARY)
-            else:
-                widget.configure(fg_color=ParagonTheme.BG_TERTIARY)
+            widget._selected = (path == artist['path'])
+            self._draw_music_row(widget)
         
         self.selected_artist = artist
         self.selected_album = None
@@ -12341,44 +12394,19 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self._show_artist_summary(artist)
     
     def _create_album_entry(self, album: Dict):
-        """Create an album entry in the list"""
-        frame = ctk.CTkFrame(self.album_list, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6)
-        frame.pack(fill="x", pady=2)
-        frame.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        inner = ctk.CTkFrame(frame, fg_color="transparent")
-        inner.pack(fill="x", padx=10, pady=6)
-        inner.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        # Album name
-        name_lbl = ctk.CTkLabel(inner, text=album['name'],
-                               font=ctk.CTkFont(size=15, weight="bold"),
-                               text_color=ParagonTheme.TEXT_PRIMARY,
-                               anchor="w")
-        name_lbl.pack(fill="x")
-        name_lbl.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        # Track count and cover status
-        status_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        status_frame.pack(fill="x", pady=(2, 0))
-        status_frame.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        track_lbl = ctk.CTkLabel(status_frame, text=f"{album['track_count']} tracks",
-                                font=ctk.CTkFont(size=12),
-                                text_color=ParagonTheme.TEXT_MUTED)
-        track_lbl.pack(side="left")
-        track_lbl.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        # Cover indicator
-        cover_color = "#2d5a27" if album.get('has_cover') else "#5a2727"
-        cover_lbl = ctk.CTkLabel(status_frame, text="ART", width=32, height=18,
-                                fg_color=cover_color, corner_radius=3,
-                                font=ctk.CTkFont(size=10),
-                                text_color="white")
-        cover_lbl.pack(side="right")
-        cover_lbl.bind("<Button-1>", lambda e, a=album: self._select_album(a))
-        
-        self.album_widgets[album['path']] = frame
+        """Create an album entry as a two-line gradient Canvas card."""
+        row = tk.Canvas(self.album_list, height=58, highlightthickness=0, bd=0,
+                        bg=ParagonTheme.BG_DARK)
+        row.pack(fill="x", pady=2)
+        row._album = album
+        row._line1 = album['name']
+        row._line2 = f"{album['track_count']} tracks"
+        row._badge = ("ART", "#2d5a27" if album.get('has_cover') else "#5a2727")
+        row._selected = False
+        row._photo = None
+        row.bind("<Button-1>", lambda e, a=album: self._select_album(a))
+        row.bind("<Configure>", lambda e, r=row: self._draw_music_row(r))
+        self.album_widgets[album['path']] = row
     
     def _show_artist_summary(self, artist: Dict):
         """Show artist summary in right panel"""
@@ -12386,38 +12414,36 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         header.pack(fill="x", padx=15, pady=15)
         
         ctk.CTkLabel(header, text=artist['name'],
-                    font=ctk.CTkFont(family="Bebas Neue", size=36),
+                    font=ctk.CTkFont(family="Bebas Neue", size=52),
                     text_color=ParagonTheme.TEXT_PRIMARY).pack(side="left")
-        
+
         # Artist info
         info_frame = ctk.CTkFrame(self.right_panel, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
         info_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+
         info_inner = ctk.CTkFrame(info_frame, fg_color="transparent")
         info_inner.pack(fill="x", padx=15, pady=15)
-        
+
         ctk.CTkLabel(info_inner, text=f"Path: {artist['path']}",
-                    font=ctk.CTkFont(size=14),
+                    font=ctk.CTkFont(family="Bebas Neue", size=24),
                     text_color=ParagonTheme.TEXT_MUTED,
-                    wraplength=600, anchor="w", justify="left").pack(anchor="w")
-        
+                    wraplength=900, anchor="w", justify="left").pack(anchor="w")
+
         ctk.CTkLabel(info_inner, text=f"{artist['album_count']} albums • {artist['track_count']} tracks",
-                    font=ctk.CTkFont(size=18),
-                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(8, 0))
-        
+                    font=ctk.CTkFont(family="Bebas Neue", size=30),
+                    text_color=ParagonTheme.TEXT_SECONDARY).pack(anchor="w", pady=(12, 0))
+
         # Placeholder for album list
         ctk.CTkLabel(self.right_panel, text="← Select an album to view tracks",
-                    font=ctk.CTkFont(size=18),
+                    font=ctk.CTkFont(family="Bebas Neue", size=26),
                     text_color=ParagonTheme.TEXT_MUTED).pack(expand=True)
     
     def _select_album(self, album: Dict):
         """Select an album and show its tracks"""
         # Update album selection highlight
         for path, widget in self.album_widgets.items():
-            if path == album['path']:
-                widget.configure(fg_color=ParagonTheme.RED_PRIMARY)
-            else:
-                widget.configure(fg_color=ParagonTheme.BG_TERTIARY)
+            widget._selected = (path == album['path'])
+            self._draw_music_row(widget)
         
         self.selected_album = album
         
