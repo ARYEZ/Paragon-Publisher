@@ -3733,9 +3733,9 @@ class ParagonLabel(ctk.CTkLabel):
     def __init__(self, master, style="normal", **kwargs):
         defaults = {
             'text_color': ParagonTheme.TEXT_PRIMARY,
-            'font': ctk.CTkFont(family="Segoe UI", size=18),
+            'font': ctk.CTkFont(family="Bebas Neue", size=20),
         }
-        
+
         if style == "title":
             defaults['text_color'] = ParagonTheme.TEXT_PRIMARY  # White
             defaults['font'] = ctk.CTkFont(family="Bebas Neue", size=48)
@@ -3750,7 +3750,7 @@ class ParagonLabel(ctk.CTkLabel):
             defaults['font'] = ctk.CTkFont(family="Bebas Neue", size=28)
         elif style == "muted":
             defaults['text_color'] = ParagonTheme.TEXT_SECONDARY
-            defaults['font'] = ctk.CTkFont(family="Segoe UI", size=16)
+            defaults['font'] = ctk.CTkFont(family="Bebas Neue", size=18)
         
         defaults.update(kwargs)
         super().__init__(master, **defaults)
