@@ -518,9 +518,9 @@ class ParagonTheme:
     
     # Text colors
     TEXT_PRIMARY = "#ffffff"      # Main text
-    TEXT_SECONDARY = "#b0b0b0"    # Muted text
-    TEXT_MUTED = "#777777"        # Even more muted text
-    TEXT_DISABLED = "#666666"     # Disabled text
+    TEXT_SECONDARY = "#ffffff"    # (all text pure white)
+    TEXT_MUTED = "#ffffff"        # (all text pure white)
+    TEXT_DISABLED = "#ffffff"     # (all text pure white)
     
     # Status colors
     SUCCESS = "#44dd88"           # Green for success/changes
@@ -542,8 +542,8 @@ THEMES = {
         "BG_HOVER": "#1e1e1e",
         "RED_PRIMARY": "#cc2200", "RED_LIGHT": "#ff4444", "RED_DARK": "#8b1500",
         "ORANGE": "#ff4444", "GOLD": "#ff6600", "GOLD_LIGHT": "#ff8533",
-        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#b0b0b0",
-        "TEXT_MUTED": "#777777", "TEXT_DISABLED": "#666666",
+        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#ffffff",
+        "TEXT_MUTED": "#ffffff", "TEXT_DISABLED": "#ffffff",
         "SUCCESS": "#44dd88", "ERROR": "#ff4444", "WARNING": "#ffaa00",
         "BORDER_GOLD": "#ff6600", "BORDER_RED": "#8b1500", "BORDER_DARK": "#333333",
     },
@@ -555,8 +555,8 @@ THEMES = {
         "BG_HOVER": "#241213",
         "RED_PRIMARY": "#ce2221", "RED_LIGHT": "#f24343", "RED_DARK": "#8a1616",
         "ORANGE": "#ff5a2a", "GOLD": "#ff6a00", "GOLD_LIGHT": "#ff8a3d",
-        "TEXT_PRIMARY": "#f1f1f1", "TEXT_SECONDARY": "#b4b4b4",
-        "TEXT_MUTED": "#7a7a7a", "TEXT_DISABLED": "#555555",
+        "TEXT_PRIMARY": "#ffffff", "TEXT_SECONDARY": "#ffffff",
+        "TEXT_MUTED": "#ffffff", "TEXT_DISABLED": "#ffffff",
         "SUCCESS": "#3ad07a", "ERROR": "#ce2221", "WARNING": "#ffb02a",
         "BORDER_GOLD": "#ff6a00", "BORDER_RED": "#ce2221", "BORDER_DARK": "#2a1414",
     },
@@ -3724,20 +3724,8 @@ class ParagonGoldButton(ParagonButton):
         super().__init__(master, **kwargs)
 
 
-class ParagonEntry(ctk.CTkEntry):
-    """Paragon-style entry field"""
-    def __init__(self, master, **kwargs):
-        defaults = {
-            'fg_color': ParagonTheme.BG_TERTIARY,
-            'border_color': ParagonTheme.BORDER_DARK,
-            'text_color': ParagonTheme.TEXT_PRIMARY,
-            'placeholder_text_color': ParagonTheme.TEXT_DISABLED,
-            'corner_radius': 6,
-            'height': 46,
-            'font': ctk.CTkFont(family="Segoe UI", size=18),
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
+# NOTE: ParagonEntry is defined later (as a gradient-bordered input) once the
+# GradEntry wrapper exists.
 
 
 class ParagonLabel(ctk.CTkLabel):
@@ -3758,7 +3746,7 @@ class ParagonLabel(ctk.CTkLabel):
             defaults['text_color'] = ParagonTheme.TEXT_PRIMARY  # White
             defaults['font'] = ctk.CTkFont(family="Bebas Neue", size=26)
         elif style == "accent":
-            defaults['text_color'] = ParagonTheme.RED_LIGHT
+            defaults['text_color'] = "#ffffff"
             defaults['font'] = ctk.CTkFont(family="Bebas Neue", size=28)
         elif style == "muted":
             defaults['text_color'] = ParagonTheme.TEXT_SECONDARY
@@ -4143,22 +4131,144 @@ class GradientBorder(tk.Canvas):
             pass
 
 
+# ---------------------------------------------------------------------------
+# App-wide gradient-bordered inputs.
+#
+# Every text input in the app used to have a flat grey border. To give them all
+# the Paragon pink→orange gradient border (like the episode fields) without
+# touching ~90 call sites, we wrap the real CTk input widgets in a small
+# tk.Canvas that paints the gradient behind them, then point ctk.CTkEntry /
+# ctk.CTkTextbox at the wrappers. Widget methods (get/insert/delete/bind/…) are
+# delegated to the inner widget so existing code keeps working unchanged.
+# ---------------------------------------------------------------------------
+_RealCTkEntry = ctk.CTkEntry
+_RealCTkTextbox = ctk.CTkTextbox
+
+
+class _GradInput(tk.Canvas):
+    _INNER = None       # real widget class, set by subclass
+    _DELEGATE = ()      # method names forwarded to the inner widget
+
+    def __init__(self, master, bw=2, radius=8, **kwargs):
+        cw = int(kwargs.pop('width', 200) or 200)
+        ch = int(kwargs.pop('height', 36) or 36)
+        super().__init__(master, width=cw, height=ch,
+                         highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK)
+        self._bw = bw
+        self._radius = radius
+        self._photo = None
+        kwargs.pop('border_width', None)
+        kwargs.pop('border_color', None)
+        kwargs.setdefault('fg_color', ParagonTheme.BG_DARK)
+        kwargs.setdefault('bg_color', ParagonTheme.BG_DARK)
+        kwargs['corner_radius'] = max(0, radius - bw)
+        self._inner = self._INNER(self, **kwargs)
+        self._win = self.create_window(bw, bw, window=self._inner, anchor='nw')
+        tk.Canvas.bind(self, '<Configure>', self._redraw)
+        for name in self._DELEGATE:
+            fn = getattr(self._inner, name, None)
+            if callable(fn):
+                try:
+                    setattr(self, name, fn)
+                except Exception:
+                    pass
+        self._redraw()
+
+    def _redraw(self, *_):
+        try:
+            w = self.winfo_width() or int(self['width'])
+            h = self.winfo_height() or int(self['height'])
+            if w < 4 or h < 4:
+                return
+            tk.Canvas.delete(self, 'grad')
+            photo = make_gradient_photo(w, h, left_hex="#d81d45",
+                                        right_hex=ParagonTheme.GOLD,
+                                        radius=self._radius, gloss=False, border_hex=None)
+            if photo is not None:
+                self._photo = photo
+                self.create_image(0, 0, image=photo, anchor='nw', tags='grad')
+            else:
+                self.create_rectangle(1, 1, w - 1, h - 1,
+                                      outline=ParagonTheme.GOLD, tags='grad')
+            tk.Canvas.tag_lower(self, 'grad')
+            bw = self._bw
+            self.coords(self._win, bw, bw)
+            self.itemconfigure(self._win, width=max(1, w - 2 * bw),
+                               height=max(1, h - 2 * bw))
+        except Exception:
+            pass
+
+    def configure(self, **kwargs):
+        if 'width' in kwargs:
+            try:
+                tk.Canvas.configure(self, width=int(kwargs['width']))
+            except Exception:
+                pass
+        if 'height' in kwargs:
+            try:
+                tk.Canvas.configure(self, height=int(kwargs['height']))
+            except Exception:
+                pass
+        kwargs.pop('border_width', None)
+        kwargs.pop('border_color', None)
+        try:
+            self._inner.configure(**kwargs)
+        except Exception:
+            pass
+    config = configure
+
+    def cget(self, key):
+        try:
+            return self._inner.cget(key)
+        except Exception:
+            try:
+                return tk.Canvas.cget(self, key)
+            except Exception:
+                return None
+
+
+class GradEntry(_GradInput):
+    _INNER = _RealCTkEntry
+    _DELEGATE = ('get', 'insert', 'delete', 'index', 'icursor',
+                 'select_range', 'select_clear', 'select_present',
+                 'xview', 'bind', 'focus', 'focus_set', 'focus_get')
+
+
+class GradTextbox(_GradInput):
+    _INNER = _RealCTkTextbox
+    _DELEGATE = ('get', 'insert', 'delete', 'index', 'see', 'yview', 'xview',
+                 'bind', 'focus', 'focus_set', 'tag_add', 'tag_config',
+                 'tag_configure', 'tag_remove', 'mark_set', 'search',
+                 'edit_reset', 'edit_modified', 'count')
+
+    def __init__(self, master, **kwargs):
+        kwargs.setdefault('height', 100)
+        super().__init__(master, **kwargs)
+
+
+# Route every plain CTk entry / textbox through the gradient-bordered versions.
+ctk.CTkEntry = GradEntry
+ctk.CTkTextbox = GradTextbox
+
+
+class ParagonEntry(GradEntry):
+    """Paragon-style entry — now a gradient-bordered input."""
+    def __init__(self, master, **kwargs):
+        kwargs.setdefault('text_color', ParagonTheme.TEXT_PRIMARY)
+        kwargs.setdefault('placeholder_text_color', ParagonTheme.TEXT_DISABLED)
+        kwargs.setdefault('height', 46)
+        kwargs.setdefault('font', ctk.CTkFont(family="Segoe UI", size=18))
+        super().__init__(master, **kwargs)
+
+
 def make_grad_entry(parent, *, width=None, height=36, textvariable=None,
                     placeholder_text="", font=None, bw=2):
-    """Create a CTkEntry wrapped in a Paragon gradient border. Returns the
-    GradientBorder box (pack/grid it) and the inner entry."""
-    box_w = (int(width) + 2 * bw) if width else 200
-    box = GradientBorder(parent, bw=bw, height=height, width=box_w)
-    # Round the entry to match the ring's inner radius and force its corner fill
-    # black so the corners blend into the page (letting the rounded gradient
-    # show through) instead of squaring off the border.
-    inner_r = max(0, box._radius - bw)
-    entry = ctk.CTkEntry(box, textvariable=textvariable, placeholder_text=placeholder_text,
-                         fg_color=ParagonTheme.BG_DARK, bg_color=ParagonTheme.BG_DARK,
-                         border_width=0, corner_radius=inner_r,
-                         font=font or ctk.CTkFont(size=16))
-    box.attach(entry)
-    return box, entry
+    """Create a gradient-bordered entry. Returns (widget, widget) — both the
+    pack-able widget and the entry are the same GradEntry now."""
+    e = ctk.CTkEntry(parent, width=(width or 200), height=height,
+                     textvariable=textvariable, placeholder_text=placeholder_text,
+                     font=font or ctk.CTkFont(size=16))
+    return e, e
 
 
 class ParagonProgressBar(ctk.CTkProgressBar):
@@ -5742,7 +5852,7 @@ class TagFilenameDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             row, text="→",
             font=ctk.CTkFont(size=14),
-            text_color=ParagonTheme.GOLD
+            text_color="#ffffff"
         ).pack(side="left", padx=10)
         
         ctk.CTkLabel(
@@ -6939,13 +7049,13 @@ class MusicBrainzAlbumLookup(ctk.CTkToplevel):
         header_frame.pack_propagate(False)
         
         ctk.CTkLabel(header_frame, text="#", width=30, font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=ParagonTheme.GOLD).pack(side="left", padx=5)
+                    text_color="#ffffff").pack(side="left", padx=5)
         ctk.CTkLabel(header_frame, text="MusicBrainz Track", width=250, font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=ParagonTheme.GOLD, anchor="w").pack(side="left", padx=5)
+                    text_color="#ffffff", anchor="w").pack(side="left", padx=5)
         ctk.CTkLabel(header_frame, text="→", width=30, font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=ParagonTheme.TEXT_SECONDARY).pack(side="left")
         ctk.CTkLabel(header_frame, text="Your File", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=ParagonTheme.GOLD, anchor="w").pack(side="left", padx=5, fill="x", expand=True)
+                    text_color="#ffffff", anchor="w").pack(side="left", padx=5, fill="x", expand=True)
         
         # Track list
         self.track_list = ctk.CTkScrollableFrame(right_panel, fg_color=ParagonTheme.BG_DARK)
@@ -7140,7 +7250,7 @@ class MusicBrainzAlbumLookup(ctk.CTkToplevel):
         # Track number
         track_num = track.get('track', str(index + 1))
         ctk.CTkLabel(frame, text=track_num, width=30, font=ctk.CTkFont(size=12),
-                    text_color=ParagonTheme.GOLD).pack(side="left", padx=5)
+                    text_color="#ffffff").pack(side="left", padx=5)
         
         # MusicBrainz track title
         title = track.get('title', 'Unknown')
@@ -7656,7 +7766,7 @@ class MovieScraperDialog(ctk.CTkToplevel):
         rating_lbl = ctk.CTkLabel(
             content, text=rating_text,
             font=ctk.CTkFont(size=11),
-            text_color=ParagonTheme.GOLD, anchor="w"
+            text_color="#ffffff", anchor="w"
         )
         rating_lbl.pack(fill="x")
         rating_lbl.bind("<Button-1>", lambda e, idx=index: self._select_movie(idx))
@@ -7919,7 +8029,7 @@ class ImageChooserDialog(ctk.CTkToplevel):
             header,
             text=title_text,
             font=ctk.CTkFont(family="Bebas Neue", size=36, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         ).pack(side="left")
         
         # Source selector (TMDB / Fanart.tv)
@@ -8048,7 +8158,7 @@ class ImageChooserDialog(ctk.CTkToplevel):
             msg_frame,
             text="Fanart.tv API Key Required",
             font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         ).pack(pady=(0, 10))
         
         ctk.CTkLabel(
@@ -8077,7 +8187,7 @@ class ImageChooserDialog(ctk.CTkToplevel):
             msg_frame,
             text="TVDB ID Required for Fanart.tv",
             font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         ).pack(pady=(0, 10))
         
         ctk.CTkLabel(
@@ -8834,7 +8944,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
             title_frame, 
             text="MOVIE EDITOR",
             font=ctk.CTkFont(family="Bebas Neue", size=48, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         )
         title_label.pack(side="left")
         
@@ -10024,11 +10134,11 @@ class TVScraperDialog(ctk.CTkToplevel):
         header.pack_propagate(False)
         
         ctk.CTkLabel(header, text="Ep", width=30, font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color=ParagonTheme.GOLD).pack(side="left", padx=5)
+                    text_color="#ffffff").pack(side="left", padx=5)
         ctk.CTkLabel(header, text="Episode Title", width=200, font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color=ParagonTheme.GOLD, anchor="w").pack(side="left", padx=5)
+                    text_color="#ffffff", anchor="w").pack(side="left", padx=5)
         ctk.CTkLabel(header, text="Your File", font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color=ParagonTheme.GOLD, anchor="w").pack(side="left", padx=5)
+                    text_color="#ffffff", anchor="w").pack(side="left", padx=5)
         
         for ep in episodes:
             self._add_episode_match_row(ep, season_number)
@@ -10046,7 +10156,7 @@ class TVScraperDialog(ctk.CTkToplevel):
         
         # Episode number
         ctk.CTkLabel(frame, text=str(ep_num), width=30, font=ctk.CTkFont(size=11),
-                    text_color=ParagonTheme.GOLD).pack(side="left", padx=5)
+                    text_color="#ffffff").pack(side="left", padx=5)
         
         # Episode title
         title = episode.get('name', 'Unknown')[:30]
@@ -12695,7 +12805,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         if self.selected_artist:
             ctk.CTkLabel(title_frame, text=self.selected_artist['name'],
                         font=ctk.CTkFont(size=18),
-                        text_color=ParagonTheme.GOLD_LIGHT,
+                        text_color="#ffffff",
                         anchor="w").pack(anchor="w")
         
         ctk.CTkLabel(title_frame, text=f"{album['track_count']} tracks",
@@ -13808,7 +13918,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             header, text="TV SHOW EDITOR",
             font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_TITLE, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         ).pack(side="left")
         
         ctk.CTkButton(
@@ -14165,14 +14275,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
-        plot_box = GradientBorder(plot_frame, bw=2, height=100)
-        plot_box.pack(side="left", fill="x", expand=True)
-        self.ep_plot_text = ctk.CTkTextbox(plot_box, fg_color=ParagonTheme.BG_DARK,
-                                           bg_color=ParagonTheme.BG_DARK,
-                                           border_width=0,
-                                           corner_radius=max(0, plot_box._radius - 1),
+        self.ep_plot_text = ctk.CTkTextbox(plot_frame, height=100,
                                            font=ctk.CTkFont(size=self.FONT_NORMAL))
-        plot_box.attach(self.ep_plot_text)
+        self.ep_plot_text.pack(side="left", fill="x", expand=True)
         
         # Runtime and User Rating row
         runtime_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14256,7 +14361,7 @@ class TVEditorDialog(ctk.CTkToplevel):
             else:
                 self.after(0, lambda: self.ep_status_label.configure(
                     text=f"Episode not found:\nS{season:02d}E{episode:02d}",
-                    text_color=ParagonTheme.RED_LIGHT
+                    text_color="#ffffff"
                 ))
         
         threading.Thread(target=fetch, daemon=True).start()
@@ -14514,7 +14619,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         else:
             self.tmdb_status_label = ctk.CTkLabel(loaded_label, text="🔄 Linking to TMDB...",
                         font=ctk.CTkFont(size=11),
-                        text_color=ParagonTheme.GOLD).pack(padx=10, pady=(0, 8))
+                        text_color="#ffffff").pack(padx=10, pady=(0, 8))
         
         ctk.CTkLabel(self.results_list, text="Search online to update:",
                     font=ctk.CTkFont(size=11),
@@ -15138,7 +15243,7 @@ if HAS_DND:
         ctk.CTkLabel(
             title_frame, text="TV SHOW EDITOR",
             font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_TITLE, weight="bold"),
-            text_color=ParagonTheme.RED_LIGHT
+            text_color="#ffffff"
         ).pack(side="left")
         
         # Maximize button
@@ -16079,7 +16184,7 @@ class PyRenamerApp(DnDCTk):
                 title_frame,
                 text="PYRENAMER",
                 font=ctk.CTkFont(family="Segoe UI Black", size=32, weight="bold"),
-                text_color=ParagonTheme.RED_LIGHT
+                text_color="#ffffff"
             )
             title.pack(side="left", anchor="w")
         
@@ -16089,7 +16194,7 @@ class PyRenamerApp(DnDCTk):
                 title_frame,
                 text="  Bulk File Renamer",
                 font=ctk.CTkFont(family="Segoe UI", size=14, slant="italic"),
-                text_color=ParagonTheme.GOLD
+                text_color="#ffffff"
             )
             subtitle.pack(side="left", anchor="s", pady=(0, 8))
     
@@ -17245,7 +17350,7 @@ MusicBrainz Album Lookup:
             height=30,
             fg_color=ParagonTheme.BG_TERTIARY,
             hover_color=ParagonTheme.BG_HOVER,
-            text_color=ParagonTheme.GOLD,
+            text_color="#ffffff",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             corner_radius=4,
             command=self._open_files_popout
@@ -17400,7 +17505,7 @@ MusicBrainz Album Lookup:
             height=30,
             fg_color=ParagonTheme.BG_TERTIARY,
             hover_color=ParagonTheme.BG_HOVER,
-            text_color=ParagonTheme.GOLD,
+            text_color="#ffffff",
             corner_radius=4,
             command=self._toggle_tag_panel
         )
