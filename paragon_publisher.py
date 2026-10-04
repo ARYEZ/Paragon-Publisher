@@ -4161,6 +4161,8 @@ class _GradInput(tk.Canvas):
         kwargs['border_width'] = 0
         kwargs.setdefault('fg_color', ParagonTheme.BG_DARK)
         kwargs.setdefault('bg_color', ParagonTheme.BG_DARK)
+        # Force the typed text pure white (CTk's own default is greyish).
+        kwargs.setdefault('text_color', "#ffffff")
         kwargs['corner_radius'] = max(0, radius - bw)
         self._inner = self._INNER(self, **kwargs)
         self._win = self.create_window(bw, bw, window=self._inner, anchor='nw')
