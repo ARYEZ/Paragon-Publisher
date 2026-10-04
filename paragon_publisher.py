@@ -14106,13 +14106,10 @@ class TVEditorDialog(ctk.CTkToplevel):
         self._create_genre_chips()
 
         ParagonLabel(scroll, text="Network/Studio", style="header").pack(anchor="w", pady=(0, 8))
-        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8, height=80,
+        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.studios_frame.pack(fill="x", pady=(0, 15))
-        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio",
-                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                          font=ctk.CTkFont(size=self.FONT_NORMAL))
-        self.studios_label.pack(padx=15, pady=15, anchor="w")
+        self._create_studio_chips()
 
     def _create_genre_chips(self):
         for widget in self.genres_frame.winfo_children():
@@ -14182,7 +14179,60 @@ class TVEditorDialog(ctk.CTkToplevel):
         else:
             self.selected_genres.add(genre)
         self._create_genre_chips()
-    
+
+    def _chip_width(self, text):
+        return max(84, int(len(str(text)) * 11) + 26)
+
+    def _create_studio_chips(self):
+        if not hasattr(self, 'studios_frame'):
+            return
+        for widget in self.studios_frame.winfo_children():
+            widget.destroy()
+
+        studios = sorted(self.selected_studios)
+        if studios:
+            row_frame = None
+            for i, studio in enumerate(studios):
+                if i % 3 == 0:
+                    row_frame = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
+                    row_frame.pack(fill="x", padx=10, pady=4)
+                btn = ParagonButton(
+                    row_frame, text=f"{studio}  ✕", height=34,
+                    width=self._chip_width(studio) + 20,
+                    fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
+                    command=lambda s=studio: self._remove_studio(s)
+                )
+                btn.pack(side="left", padx=4, pady=4)
+                btn.set_selected(True)
+        else:
+            ctk.CTkLabel(self.studios_frame, text="No network/studio yet — add one below",
+                         text_color=ParagonTheme.TEXT_SECONDARY,
+                         font=ctk.CTkFont(size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
+
+        add_row = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+        self.custom_studio_entry = ctk.CTkEntry(
+            add_row, width=260, height=36, placeholder_text="New network/studio...",
+            font=ctk.CTkFont(size=self.FONT_SMALL)
+        )
+        self.custom_studio_entry.pack(side="left", padx=4)
+        self.custom_studio_entry.bind("<Return>", lambda e: self._add_custom_studio())
+        ParagonButton(
+            add_row, text="+ ADD", height=36, width=90, corner_radius=8,
+            fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_studio
+        ).pack(side="left", padx=4)
+
+    def _add_custom_studio(self):
+        studio = self.custom_studio_entry.get().strip()
+        if not studio:
+            return
+        self.selected_studios.add(studio)
+        self._create_studio_chips()
+
+    def _remove_studio(self, studio):
+        self.selected_studios.discard(studio)
+        self._create_studio_chips()
+
     def _create_episode_info_tab(self, parent):
         """Create the episode editing tab"""
         # Pinned action bar at the bottom so SAVE is always visible (not
@@ -14622,9 +14672,8 @@ class TVEditorDialog(ctk.CTkToplevel):
         self._create_genre_chips()
         
         if show_data.get('studio'):
-            self.selected_studios = {show_data['studio']}
-            if hasattr(self, 'studios_label'):
-                self.studios_label.configure(text=show_data['studio'])
+            self.selected_studios = {s.strip() for s in str(show_data['studio']).split(',') if s.strip()}
+            self._create_studio_chips()
         
         if self.stream_info and hasattr(self, 'video_info_labels'):
             self._update_stream_display()
@@ -14971,8 +15020,8 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         networks = details.get('networks', [])
         if networks:
-            self.studios_label.configure(text=", ".join(networks[:3]))
             self.selected_studios = set(networks)
+            self._create_studio_chips()
         
         # Load poster
         if details.get('poster_path') and HAS_PIL:
@@ -15432,13 +15481,10 @@ if HAS_DND:
         self._create_genre_chips()
 
         ParagonLabel(scroll, text="Network/Studio", style="header").pack(anchor="w", pady=(0, 8))
-        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8, height=80,
+        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.studios_frame.pack(fill="x", pady=(0, 15))
-        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio",
-                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                          font=ctk.CTkFont(size=self.FONT_NORMAL))
-        self.studios_label.pack(padx=15, pady=15, anchor="w")
+        self._create_studio_chips()
 
     def _create_genre_chips(self):
         for widget in self.genres_frame.winfo_children():
@@ -15736,8 +15782,8 @@ if HAS_DND:
         # Update network/studio
         networks = details.get('networks', [])
         if networks:
-            self.studios_label.configure(text=", ".join(networks[:3]))
             self.selected_studios = set(networks)
+            self._create_studio_chips()
         
         # Load poster
         if details.get('poster_path') and HAS_PIL:
