@@ -13848,6 +13848,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             except Exception:
                 pass
 
+        gen_state = {"running": False}
+
         def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel, beam):
             found = 0
             n = len(episodes)
@@ -13904,6 +13906,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 if plot:
                     found += 1
                 self.after(0, lambda ep=ep, plot=plot, src=src: _apply_row(ep, plot, src))
+            gen_state["running"] = False
             self.after(0, lambda: (prog.configure(
                 text=f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
                 _set_bar(1.0), gen_btn.configure(state="normal")))
@@ -13923,6 +13926,30 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             threading.Thread(target=run, daemon=True).start()
 
         def _generate():
+            # Guardrail: if a run is in progress, or summaries are already shown,
+            # confirm before (re)starting so we don't wipe existing work.
+            if gen_state["running"]:
+                messagebox.showinfo(
+                    "Generation in progress",
+                    "Summaries are still being generated. Please wait for the current "
+                    "run to finish before generating again.", parent=dlg)
+                return
+            else:
+                has_existing = False
+                for ep in episodes:
+                    box = ep.get('box')
+                    try:
+                        if box is not None and box.get("1.0", "end").strip():
+                            has_existing = True
+                            break
+                    except Exception:
+                        pass
+                if has_existing and not messagebox.askyesno(
+                        "Overwrite existing summaries?",
+                        "Some episodes already have summaries. Generating again will "
+                        "overwrite them (any edits you made will be lost).\n\nContinue?",
+                        parent=dlg, icon="warning", default="no"):
+                    return
             source = source_var.get()
             try:
                 maxsec = int(float(maxmin_e.get().strip() or 0) * 60)
@@ -13943,6 +13970,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     "Transcription needs faster-whisper.\n\nInstall it with:\n"
                     "    pip install faster-whisper\n\nThen reopen this dialog.", parent=dlg)
                 return
+            gen_state["running"] = True
             gen_btn.configure(state="disabled")
             prog.configure(text="Starting…")
             threading.Thread(target=_run, args=(
