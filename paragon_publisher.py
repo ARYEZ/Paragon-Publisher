@@ -598,6 +598,33 @@ def set_saved_theme(name):
         pass
 
 
+def pconfig_get(key, default=None):
+    """Read a single key from the shared ~/.pyrenamer_config.json."""
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        if p.exists():
+            with open(p, "r") as f:
+                return json.load(f).get(key, default)
+    except Exception:
+        pass
+    return default
+
+
+def pconfig_set(**kwargs):
+    """Merge keys into the shared ~/.pyrenamer_config.json."""
+    try:
+        p = Path.home() / ".pyrenamer_config.json"
+        cfg = {}
+        if p.exists():
+            with open(p, "r") as f:
+                cfg = json.load(f)
+        cfg.update(kwargs)
+        with open(p, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+
 # =============================================================================
 # RENAME RULES
 # =============================================================================
@@ -2441,6 +2468,92 @@ class RadioDramaPlotFinder:
         if plot:
             return plot, src
         return RadioDramaPlotFinder.archive_org(series, title, timeout)
+
+
+class AudioTranscriber:
+    """Local speech-to-text via faster-whisper (optional dependency — the model
+    downloads on first use and runs entirely on the user's machine)."""
+    _model = None
+    _model_size = None
+
+    @staticmethod
+    def available():
+        try:
+            import faster_whisper  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _get_model(size):
+        from faster_whisper import WhisperModel
+        if AudioTranscriber._model is None or AudioTranscriber._model_size != size:
+            # int8 keeps it light on CPU; device="auto" uses CUDA when present.
+            AudioTranscriber._model = WhisperModel(size, device="auto", compute_type="int8")
+            AudioTranscriber._model_size = size
+        return AudioTranscriber._model
+
+    @staticmethod
+    def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None):
+        """Return the transcript text. max_seconds > 0 stops early (to cap time)."""
+        model = AudioTranscriber._get_model(model_size)
+        segments, info = model.transcribe(filepath, beam_size=1)
+        total = getattr(info, 'duration', 0) or 0
+        parts = []
+        for seg in segments:
+            parts.append(seg.text)
+            if progress_cb and total:
+                try:
+                    progress_cb(min(1.0, (seg.end or 0) / total))
+                except Exception:
+                    pass
+            if max_seconds and (seg.end or 0) >= max_seconds:
+                break
+        return " ".join(p.strip() for p in parts).strip()
+
+
+class PlotSummarizer:
+    """Turn a transcript into a short episode plot via a local Ollama model, an
+    OpenAI-compatible API, or a crude offline extractive fallback."""
+    @staticmethod
+    def _prompt(transcript, series, title):
+        t = (transcript or "")[:12000]
+        return (f'You are writing a plot synopsis for an episode of the audio/radio drama '
+                f'"{series}", titled "{title}". Based on the transcript below, write a concise '
+                f'2 to 4 sentence episode synopsis in the neutral style of a TV guide — describe '
+                f'what happens, do not mention that this is a transcript, do not add commentary '
+                f'or headings. Transcript:\n\n{t}')
+
+    @staticmethod
+    def ollama(transcript, series, title, url="http://localhost:11434", model="llama3.1"):
+        body = json.dumps({"model": model,
+                           "prompt": PlotSummarizer._prompt(transcript, series, title),
+                           "stream": False}).encode("utf-8")
+        req = urllib.request.Request(url.rstrip("/") + "/api/generate", data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        return (data.get("response") or "").strip()
+
+    @staticmethod
+    def openai(transcript, series, title, base_url, api_key, model="gpt-4o-mini"):
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": PlotSummarizer._prompt(transcript, series, title)}],
+            "temperature": 0.4,
+        }).encode("utf-8")
+        req = urllib.request.Request(base_url.rstrip("/") + "/chat/completions", data=body,
+                                     headers={"Content-Type": "application/json",
+                                              "Authorization": f"Bearer {api_key}"})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        return data["choices"][0]["message"]["content"].strip()
+
+    @staticmethod
+    def extractive(transcript, max_sentences=4):
+        sents = re.split(r'(?<=[.!?])\s+', (transcript or "").strip())
+        sents = [s for s in sents if len(s.split()) > 3]
+        return " ".join(sents[:max_sentences]).strip()
 
 
 class NFOGenerator:
@@ -13504,17 +13617,61 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         # ---- Review dialog ----
         dlg = ctk.CTkToplevel(self)
         dlg.title("Fix Plots")
-        dlg.geometry("940x720")
+        dlg.geometry("980x780")
         dlg.transient(self)
         outer = ctk.CTkFrame(dlg, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
         outer.pack(fill="both", expand=True, padx=4, pady=4)
         inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
         inner.pack(fill="both", expand=True, padx=2, pady=2)
         ParagonLabel(inner, text="FIX PLOTS", style="header").pack(anchor="w", padx=16, pady=(14, 2))
-        ParagonLabel(inner, text=f"{series} · {len(episodes)} episodes · Wikipedia + Internet Archive",
-                     style="muted").pack(anchor="w", padx=16, pady=(0, 8))
-        prog = ParagonLabel(inner, text="Searching…", style="muted")
-        prog.pack(anchor="w", padx=16, pady=(0, 6))
+        ParagonLabel(inner, text=f"{series} · {len(episodes)} episodes",
+                     style="muted").pack(anchor="w", padx=16, pady=(0, 6))
+
+        # ---- Engine controls ----
+        ctrl = ctk.CTkFrame(inner, fg_color=ParagonTheme.BG_SECONDARY, corner_radius=8,
+                            border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        ctrl.pack(fill="x", padx=12, pady=(0, 6))
+        row1 = ctk.CTkFrame(ctrl, fg_color="transparent"); row1.pack(fill="x", padx=10, pady=(8, 2))
+        ParagonLabel(row1, text="Source", style="muted", width=70, anchor="w").pack(side="left")
+        source_var = ctk.StringVar(value=pconfig_get("plot_source", "Online"))
+        ParagonOptionMenu(row1, values=["Online", "Transcribe"], variable=source_var,
+                          width=140).pack(side="left", padx=(4, 16))
+        ParagonLabel(row1, text="Whisper", style="muted", anchor="w").pack(side="left")
+        wmodel_var = ctk.StringVar(value=pconfig_get("plot_whisper_model", "base"))
+        ParagonOptionMenu(row1, values=["tiny", "base", "small", "medium"], variable=wmodel_var,
+                          width=110).pack(side="left", padx=(4, 16))
+        ParagonLabel(row1, text="Max min (0=all)", style="muted", anchor="w").pack(side="left")
+        maxmin_e = ParagonEntry(row1, width=60, height=36)
+        maxmin_e.insert(0, str(pconfig_get("plot_max_minutes", 0)))
+        maxmin_e.pack(side="left", padx=(4, 16))
+        ParagonLabel(row1, text="Summarizer", style="muted", anchor="w").pack(side="left")
+        summ_var = ctk.StringVar(value=pconfig_get("plot_summarizer", "Ollama"))
+        ParagonOptionMenu(row1, values=["Ollama", "Cloud API", "Extractive"], variable=summ_var,
+                          width=130).pack(side="left", padx=(4, 0))
+
+        row2 = ctk.CTkFrame(ctrl, fg_color="transparent"); row2.pack(fill="x", padx=10, pady=(2, 4))
+        ParagonLabel(row2, text="Ollama", style="muted", width=70, anchor="w").pack(side="left")
+        ollama_url_e = ParagonEntry(row2, width=200, height=36)
+        ollama_url_e.insert(0, pconfig_get("plot_ollama_url", "http://localhost:11434"))
+        ollama_url_e.pack(side="left", padx=(4, 8))
+        ollama_model_e = ParagonEntry(row2, width=150, height=36)
+        ollama_model_e.insert(0, pconfig_get("plot_ollama_model", "llama3.1"))
+        ollama_model_e.pack(side="left", padx=(0, 0))
+
+        row3 = ctk.CTkFrame(ctrl, fg_color="transparent"); row3.pack(fill="x", padx=10, pady=(0, 8))
+        ParagonLabel(row3, text="Cloud", style="muted", width=70, anchor="w").pack(side="left")
+        cloud_base_e = ParagonEntry(row3, width=220, height=36)
+        cloud_base_e.insert(0, pconfig_get("plot_cloud_base", "https://api.openai.com/v1"))
+        cloud_base_e.pack(side="left", padx=(4, 8))
+        cloud_key_e = ParagonEntry(row3, width=180, height=36, show="•")
+        cloud_key_e.insert(0, pconfig_get("plot_cloud_key", ""))
+        cloud_key_e.pack(side="left", padx=(0, 8))
+        cloud_model_e = ParagonEntry(row3, width=150, height=36)
+        cloud_model_e.insert(0, pconfig_get("plot_cloud_model", "gpt-4o-mini"))
+        cloud_model_e.pack(side="left")
+
+        prog = ParagonLabel(inner, text="Pick a source and press Generate.", style="muted")
+        prog.pack(anchor="w", padx=16, pady=(2, 6))
 
         scroll = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY)
         scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
@@ -13528,38 +13685,93 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             ep['inc'] = ctk.BooleanVar(value=False)
             ParagonGradientCheckbox(top, text=f"E{ep['episode']:02d} · {ep['title']}",
                                     variable=ep['inc']).pack(side="left")
-            ep['src_lbl'] = ParagonLabel(top, text="…", style="muted", anchor="e")
+            ep['src_lbl'] = ParagonLabel(top, text="—", style="muted", anchor="e")
             ep['src_lbl'].pack(side="right")
             ep['box'] = ctk.CTkTextbox(card, height=90, fg_color=ParagonTheme.BG_TERTIARY,
                                        border_width=0)
             ep['box'].pack(fill="x", padx=10, pady=(2, 10))
 
-        def _fetch():
+        def _apply_row(ep, plot, src):
+            try:
+                ep['box'].delete("1.0", "end")
+                ep['box'].insert("1.0", plot or "")
+                ep['src_lbl'].configure(text=src or "not found")
+                if plot:
+                    ep['inc'].set(True)
+            except Exception:
+                pass
+
+        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel):
             found = 0
+            n = len(episodes)
             for i, ep in enumerate(episodes, 1):
-                self.after(0, lambda i=i: prog.configure(text=f"Searching… {i}/{len(episodes)}"))
+                epn = ep['episode']
                 plot, src = "", ""
-                try:
-                    plot, src = RadioDramaPlotFinder.find(series, ep['title'])
-                except Exception as e:
-                    print(f"plot find error: {e}")
+                if source == "Online":
+                    self.after(0, lambda i=i: prog.configure(text=f"Searching… {i}/{n}"))
+                    try:
+                        plot, src = RadioDramaPlotFinder.find(series, ep['title'])
+                    except Exception as e:
+                        print(f"plot find error: {e}")
+                else:
+                    self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Transcribing E{epn:02d}… ({i}/{n})"))
+                    transcript = ""
+                    try:
+                        transcript = AudioTranscriber.transcribe(ep['file'], wmodel, max_seconds=maxsec)
+                    except Exception as e:
+                        print(f"transcribe error: {e}")
+                        self.after(0, lambda ep=ep: ep['src_lbl'].configure(text="transcribe error"))
+                    if transcript:
+                        self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Summarizing E{epn:02d}… ({i}/{n})"))
+                        try:
+                            if summ == "Ollama":
+                                plot = PlotSummarizer.ollama(transcript, series, ep['title'], ourl, omodel)
+                                src = "Whisper + Ollama"
+                            elif summ == "Cloud API":
+                                plot = PlotSummarizer.openai(transcript, series, ep['title'], cbase, ckey, cmodel)
+                                src = "Whisper + Cloud"
+                            else:
+                                plot = PlotSummarizer.extractive(transcript)
+                                src = "Whisper (extractive)"
+                        except Exception as e:
+                            print(f"summarize error: {e}")
+                            plot = PlotSummarizer.extractive(transcript)
+                            src = "Whisper (extractive — summary failed)"
                 if plot:
                     found += 1
+                self.after(0, lambda ep=ep, plot=plot, src=src: _apply_row(ep, plot, src))
+            self.after(0, lambda: (prog.configure(
+                text=f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
+                gen_btn.configure(state="normal")))
 
-                def _apply_row(ep=ep, plot=plot, src=src):
-                    try:
-                        ep['box'].delete("1.0", "end")
-                        ep['box'].insert("1.0", plot or "")
-                        ep['src_lbl'].configure(text=src or "not found")
-                        if plot:
-                            ep['inc'].set(True)
-                    except Exception:
-                        pass
-                self.after(0, _apply_row)
-            self.after(0, lambda: prog.configure(
-                text=f"Found {found}/{len(episodes)}. Review, then Write NFOs."))
-
-        threading.Thread(target=_fetch, daemon=True).start()
+        def _generate():
+            source = source_var.get()
+            try:
+                maxsec = int(float(maxmin_e.get().strip() or 0) * 60)
+            except Exception:
+                maxsec = 0
+            pconfig_set(plot_source=source, plot_whisper_model=wmodel_var.get(),
+                        plot_summarizer=summ_var.get(), plot_max_minutes=maxmin_e.get().strip(),
+                        plot_ollama_url=ollama_url_e.get().strip(),
+                        plot_ollama_model=ollama_model_e.get().strip(),
+                        plot_cloud_base=cloud_base_e.get().strip(),
+                        plot_cloud_key=cloud_key_e.get().strip(),
+                        plot_cloud_model=cloud_model_e.get().strip())
+            if source == "Transcribe" and not AudioTranscriber.available():
+                messagebox.showwarning(
+                    "faster-whisper not installed",
+                    "Transcription needs faster-whisper.\n\nInstall it with:\n"
+                    "    pip install faster-whisper\n\nThen reopen this dialog.", parent=dlg)
+                return
+            gen_btn.configure(state="disabled")
+            prog.configure(text="Starting…")
+            threading.Thread(target=_run, args=(
+                source, wmodel_var.get(), maxsec, summ_var.get(),
+                ollama_url_e.get().strip() or "http://localhost:11434",
+                ollama_model_e.get().strip() or "llama3.1",
+                cloud_base_e.get().strip() or "https://api.openai.com/v1",
+                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini"),
+                daemon=True).start()
 
         def _write():
             written = skipped = 0
@@ -13584,6 +13796,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
         ParagonSecondaryButton(btns, text="CANCEL", command=dlg.destroy, width=100).pack(side="left")
         ParagonButton(btns, text="💾 WRITE NFOS", command=_write, width=170).pack(side="right")
+        gen_btn = ParagonButton(btns, text="⚙ GENERATE", command=_generate, width=160)
+        gen_btn.pack(side="right", padx=(0, 10))
         dlg.after(80, lambda: (dlg.lift(), dlg.grab_set()))
 
     def _write_episode_nfo(self, audio_path, series, season, episode, title, plot):
