@@ -3774,6 +3774,110 @@ class ParagonCheckbox(ctk.CTkCheckBox):
         super().__init__(master, **defaults)
 
 
+class ParagonGradientCheckbox(tk.Canvas):
+    """A checkbox whose box shows the Paragon gradient when checked (Canvas-based,
+    since CTk can't paint a gradient). Drop-in for ParagonCheckbox's common use:
+    supports text, variable, command and .get()."""
+    def __init__(self, master, text="", variable=None, command=None, box=22, **kwargs):
+        for k in ('fg_color', 'hover_color', 'border_color', 'checkmark_color',
+                  'text_color', 'font', 'corner_radius', 'checkbox_width',
+                  'checkbox_height'):
+            kwargs.pop(k, None)
+        self._text = text
+        self._box = box
+        try:
+            from tkinter import font as _tkfont
+            self._font = _tkfont.Font(family="Segoe UI", size=15)
+            tw = self._font.measure(text)
+        except Exception:
+            self._font = ("Segoe UI", 15)
+            tw = len(text) * 9
+        w = box + 10 + tw + 8
+        h = max(box + 6, 30)
+        super().__init__(master, width=w, height=h, bg=ParagonTheme.BG_DARK,
+                         highlightthickness=0, bd=0, **kwargs)
+        self._var = variable if variable is not None else ctk.BooleanVar(value=False)
+        self._command = command
+        self._photo = None
+        try:
+            tk.Canvas.configure(self, cursor="hand2")
+        except Exception:
+            pass
+        self.bind("<Button-1>", self._toggle)
+        try:
+            self._var.trace_add("write", lambda *a: self._draw())
+        except Exception:
+            try:
+                self._var.trace("w", lambda *a: self._draw())
+            except Exception:
+                pass
+        self._draw()
+
+    def get(self):
+        try:
+            return self._var.get()
+        except Exception:
+            return False
+
+    def _toggle(self, _):
+        try:
+            self._var.set(not self._var.get())
+        except Exception:
+            pass
+        if callable(self._command):
+            try:
+                self._command()
+            except Exception:
+                pass
+
+    def _draw(self, *_):
+        try:
+            self.delete("all")
+            h = self.winfo_height() or int(self['height'])
+            b = self._box
+            y0 = (h - b) // 2
+            checked = False
+            try:
+                checked = bool(self._var.get())
+            except Exception:
+                pass
+            if checked:
+                photo = make_gradient_photo(b, b, left_hex="#d81d45",
+                                            right_hex=ParagonTheme.GOLD,
+                                            radius=5, gloss=True, border_hex="#ff8a3d")
+                if photo is not None:
+                    self._photo = photo
+                    self.create_image(2, y0, image=photo, anchor="nw")
+                else:
+                    self.create_rectangle(2, y0, 2 + b, y0 + b,
+                                          fill=ParagonTheme.RED_PRIMARY, outline="")
+                self.create_line(2 + b * 0.24, y0 + b * 0.52,
+                                 2 + b * 0.44, y0 + b * 0.72,
+                                 2 + b * 0.80, y0 + b * 0.26,
+                                 fill="#ffffff", width=3,
+                                 capstyle="round", joinstyle="round")
+            else:
+                self.create_rectangle(2, y0, 2 + b, y0 + b,
+                                      fill=ParagonTheme.BG_TERTIARY,
+                                      outline=ParagonTheme.BORDER_GOLD, width=1)
+            self.create_text(2 + b + 10, h // 2, text=self._text, anchor="w",
+                             fill="#ffffff", font=self._font)
+        except Exception:
+            pass
+
+    def configure(self, **kwargs):
+        if 'variable' in kwargs:
+            self._var = kwargs.pop('variable')
+        if 'command' in kwargs:
+            self._command = kwargs.pop('command')
+        if 'text' in kwargs:
+            self._text = kwargs.pop('text')
+        for k in ('fg_color', 'hover_color', 'border_color', 'font', 'text_color'):
+            kwargs.pop(k, None)
+        self._draw()
+    config = configure
+
+
 class ParagonRadioButton(ctk.CTkRadioButton):
     """Paragon-style radio button"""
     def __init__(self, master, **kwargs):
@@ -19999,13 +20103,13 @@ class HarvesterDialog(ctk.CTkToplevel):
 
         # Genre + channel row
         gc = ctk.CTkFrame(form, fg_color="transparent")
-        gc.pack(fill="x", padx=12, pady=(2, 6))
+        gc.pack(fill="x", padx=12, pady=(2, 4))
         ParagonLabel(gc, text="Default genre", style="muted", width=110, anchor="w").pack(side="left")
-        self.genre_entry = ParagonEntry(gc, width=180)
+        self.genre_entry = ParagonEntry(gc, width=180, height=38)
         self.genre_entry.insert(0, cfg.get("harvester_genre", ""))
         self.genre_entry.pack(side="left", padx=(6, 16))
         ParagonLabel(gc, text="YouTube channel", style="muted", anchor="w").pack(side="left")
-        self.channel_entry = ParagonEntry(gc, width=240)
+        self.channel_entry = ParagonEntry(gc, width=240, height=38)
         self.channel_entry.insert(0, cfg.get("harvester_channel", ""))
         self.channel_entry.pack(side="left", padx=(6, 0))
 
@@ -20014,22 +20118,22 @@ class HarvesterDialog(ctk.CTkToplevel):
         # = use the playlist saved with each show; a value here overrides it for
         # this run.
         pl = ctk.CTkFrame(form, fg_color="transparent")
-        pl.pack(fill="x", padx=12, pady=(0, 6))
+        pl.pack(fill="x", padx=12, pady=(0, 4))
         ParagonLabel(pl, text="Match playlist", style="muted", width=110, anchor="w").pack(side="left")
-        self.match_playlist_entry = ParagonEntry(pl)
+        self.match_playlist_entry = ParagonEntry(pl, height=38)
         self.match_playlist_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
         ParagonLabel(pl, text="(optional · blank uses each show's saved playlist)",
                      style="muted", anchor="w").pack(side="left")
 
         # NFO handling + hint row
         nf = ctk.CTkFrame(form, fg_color="transparent")
-        nf.pack(fill="x", padx=12, pady=(2, 10))
+        nf.pack(fill="x", padx=12, pady=(2, 8))
         ParagonLabel(nf, text="Existing NFO", style="muted", width=110, anchor="w").pack(side="left")
         self.nfo_var = ctk.StringVar(value=cfg.get("harvester_nfo", "skip"))
         ParagonOptionMenu(nf, values=["skip", "overwrite"], variable=self.nfo_var,
                           width=140).pack(side="left", padx=(6, 16))
         self.ask_each_var = ctk.BooleanVar(value=cfg.get("harvester_ask_each", False))
-        ParagonCheckbox(nf, text="Ask for each new show",
+        ParagonGradientCheckbox(nf, text="Ask for each new show",
                         variable=self.ask_each_var).pack(side="left", padx=(0, 16))
         hint = "yt-dlp + ffmpeg add richer metadata when installed."
         if not paragon_harvester.WATCHDOG_AVAILABLE:
@@ -20104,7 +20208,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.max_len_entry.pack(side="left", padx=(2, 3))
         ParagonLabel(opt, text="min", style="muted", anchor="w").pack(side="left", padx=(0, 14))
         self.skip_var = ctk.BooleanVar(value=cfg.get("harvester_skip", True))
-        ParagonCheckbox(opt, text="Skip already downloaded",
+        ParagonGradientCheckbox(opt, text="Skip already downloaded",
                         variable=self.skip_var).pack(side="left", padx=(0, 14))
         ParagonLabel(opt, text="Repeat every", style="muted", anchor="w").pack(side="left")
         self.repeat_entry = ParagonEntry(opt, width=50)
@@ -20115,7 +20219,7 @@ class HarvesterDialog(ctk.CTkToplevel):
         opt2 = ctk.CTkFrame(dl, fg_color="transparent")
         opt2.pack(fill="x", padx=12, pady=(0, 6))
         self.whole_playlist_var = ctk.BooleanVar(value=cfg.get("harvester_whole_playlist", False))
-        ParagonCheckbox(opt2, text="Whole playlist/channel (watch links grab just the video)",
+        ParagonGradientCheckbox(opt2, text="Whole playlist/channel (watch links grab just the video)",
                         variable=self.whole_playlist_var).pack(side="left", padx=(0, 16))
         ParagonLabel(opt2, text="Video codec", style="muted", anchor="w").pack(side="left")
         self.codec_var = ctk.StringVar(value=cfg.get("harvester_codec", "H.264 (compatible)"))
@@ -20244,12 +20348,12 @@ class HarvesterDialog(ctk.CTkToplevel):
 
     def _path_row(self, parent, label, value):
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=12, pady=(10, 2))
+        row.pack(fill="x", padx=12, pady=(6, 2))
         ParagonLabel(row, text=label, style="muted", width=110, anchor="w").pack(side="left")
-        entry = ParagonEntry(row)
+        entry = ParagonEntry(row, height=38)
         entry.insert(0, value or "")
         entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
-        ParagonSecondaryButton(row, text="Browse", width=90,
+        ParagonSecondaryButton(row, text="Browse", width=90, height=38,
                                command=lambda e=entry, t=label: self._browse(e, t)).pack(side="left")
         return entry
 
