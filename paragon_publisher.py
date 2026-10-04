@@ -2526,16 +2526,23 @@ class AudioTranscriber:
             print(f"ffmpeg decode unavailable ({e}); falling back to PyAV path")
         segments, info = model.transcribe(audio_input, beam_size=1)
         total = getattr(info, 'duration', 0) or 0
+        if capped and total:
+            total = min(total, capped)
         parts = []
         for seg in segments:
             parts.append(seg.text)
-            if progress_cb and total:
+            if progress_cb:
                 try:
-                    progress_cb(min(1.0, (seg.end or 0) / total))
+                    progress_cb(seg.end or 0, total)
                 except Exception:
                     pass
             if capped and (seg.end or 0) >= capped:
                 break
+        if progress_cb and total:
+            try:
+                progress_cb(total, total)
+            except Exception:
+                pass
         return " ".join(p.strip() for p in parts).strip()
 
 
@@ -13698,7 +13705,21 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         cloud_model_e.pack(side="left")
 
         prog = ParagonLabel(inner, text="Pick a source and press Generate.", style="muted")
-        prog.pack(anchor="w", padx=16, pady=(2, 6))
+        prog.pack(anchor="w", padx=16, pady=(2, 2))
+        pbar = ctk.CTkProgressBar(inner, height=10, progress_color=ParagonTheme.GOLD,
+                                  fg_color=ParagonTheme.BG_TERTIARY)
+        pbar.set(0)
+        pbar.pack(fill="x", padx=16, pady=(0, 6))
+
+        def _set_bar(frac):
+            try:
+                pbar.set(max(0.0, min(1.0, frac)))
+            except Exception:
+                pass
+
+        def _fmt_mmss(sec):
+            sec = int(max(0, sec))
+            return f"{sec // 60}:{sec % 60:02d}"
 
         scroll = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY)
         scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
@@ -13740,11 +13761,21 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     except Exception as e:
                         print(f"plot find error: {e}")
                 else:
-                    self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Transcribing E{epn:02d}… ({i}/{n})"))
+                    self.after(0, lambda i=i, epn=epn: (
+                        prog.configure(text=f"Transcribing E{epn:02d}… ({i}/{n})"), _set_bar(0)))
+
+                    def _tp(cur, total, i=i, epn=epn):
+                        frac = (cur / total) if total else 0.0
+                        self.after(0, lambda: (prog.configure(
+                            text=f"Transcribing E{epn:02d} ({i}/{n}) — "
+                                 f"{_fmt_mmss(cur)} / {_fmt_mmss(total)} ({int(frac * 100)}%)"),
+                            _set_bar(frac)))
+
                     transcript = ""
                     err = ""
                     try:
-                        transcript = AudioTranscriber.transcribe(ep['file'], wmodel, max_seconds=maxsec)
+                        transcript = AudioTranscriber.transcribe(ep['file'], wmodel,
+                                                                 max_seconds=maxsec, progress_cb=_tp)
                     except Exception as e:
                         err = f"{type(e).__name__}: {e}"
                         print(f"transcribe error on {ep['file']}: {err}")
@@ -13774,7 +13805,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 self.after(0, lambda ep=ep, plot=plot, src=src: _apply_row(ep, plot, src))
             self.after(0, lambda: (prog.configure(
                 text=f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
-                gen_btn.configure(state="normal")))
+                _set_bar(1.0), gen_btn.configure(state="normal")))
 
         def _generate():
             source = source_var.get()
