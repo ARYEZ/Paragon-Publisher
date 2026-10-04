@@ -8895,11 +8895,10 @@ class MovieEditorDialog(ctk.CTkToplevel):
         center_panel = ctk.CTkFrame(content, fg_color="transparent")
         center_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
-        self.tabs = ctk.CTkTabview(center_panel, fg_color=ParagonTheme.BG_SECONDARY,
-                                   segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                   segmented_button_selected_color=ParagonTheme.RED_PRIMARY,
-                                   segmented_button_unselected_color=ParagonTheme.BG_TERTIARY,
-                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.tabs = ParagonGradientTabview(center_panel,
+                                           fg_color=ParagonTheme.BG_SECONDARY,
+                                           border_color=ParagonTheme.BORDER_GOLD,
+                                           border_width=1)
         self.tabs.pack(fill="both", expand=True)
 
         self.tabs.add("Information")
@@ -15207,9 +15206,10 @@ if HAS_DND:
         middle_frame = ctk.CTkFrame(content, fg_color="transparent")
         middle_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
-        self.tabs = ctk.CTkTabview(middle_frame, fg_color=ParagonTheme.BG_SECONDARY,
-                                   segmented_button_fg_color=ParagonTheme.BG_TERTIARY,
-                                   segmented_button_selected_color=ParagonTheme.RED_PRIMARY)
+        self.tabs = ParagonGradientTabview(middle_frame,
+                                           fg_color=ParagonTheme.BG_SECONDARY,
+                                           border_color=ParagonTheme.BORDER_GOLD,
+                                           border_width=1)
         self.tabs.pack(fill="both", expand=True)
         
         self.tabs.add("Information")
