@@ -20297,9 +20297,7 @@ class HarvesterDialog(ctk.CTkToplevel):
                                          command=self._start_process, width=170, height=40)
         self.process_btn.pack(side="left", padx=(0, 10))
         self.monitor_btn = ParagonButton(actions, text="👁 MONITOR",
-                                         command=self._toggle_monitor, width=170, height=40,
-                                         fg_color=ParagonTheme.BG_TERTIARY,
-                                         hover_color=ParagonTheme.BG_HOVER)
+                                         command=self._toggle_monitor, width=170, height=40)
         self.monitor_btn.pack(side="left", padx=(0, 10))
         self.stop_btn = ParagonButton(actions, text="⏹ STOP",
                                       command=self._request_stop, width=110, height=40)
