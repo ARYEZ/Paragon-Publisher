@@ -2512,9 +2512,11 @@ class AudioTranscriber:
         return np.frombuffer(proc.stdout, np.int16).astype(np.float32) / 32768.0
 
     @staticmethod
-    def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None, beam_size=5):
+    def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None,
+                   beam_size=5, skim=False):
         """Return the transcript text. max_seconds > 0 stops early (to cap time);
-        beam_size trades speed for accuracy (1 = greedy, 5-10 = more accurate)."""
+        beam_size trades speed for accuracy (1 = greedy, 5-10 = more accurate);
+        skim keeps only the first 30s of every minute (≈2x faster, choppier)."""
         model = AudioTranscriber._get_model(model_size)
         # Decode with ffmpeg ourselves (robust); only fall back to the file path
         # (PyAV) if ffmpeg/numpy aren't available.
@@ -2523,6 +2525,17 @@ class AudioTranscriber:
         try:
             audio_input = AudioTranscriber._decode_pcm(filepath, max_seconds=max_seconds)
             capped = 0  # already trimmed by ffmpeg
+            if skim:
+                # Keep the first 30s of each 60s window, drop the rest. Halves the
+                # audio fed to Whisper (so ~half the time) while still sampling the
+                # whole span. Only possible on the decoded-array path.
+                import numpy as np
+                sr = 16000
+                win, keep = 60 * sr, 30 * sr
+                a = audio_input
+                chunks = [a[i:i + keep] for i in range(0, len(a), win)]
+                if chunks:
+                    audio_input = np.concatenate(chunks)
         except Exception as e:
             print(f"ffmpeg decode unavailable ({e}); falling back to PyAV path")
         segments, info = model.transcribe(audio_input, beam_size=max(1, int(beam_size)))
@@ -13780,6 +13793,9 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         summ_var = ctk.StringVar(value=pconfig_get("plot_summarizer", "Ollama"))
         ParagonOptionMenu(row1b, values=["Ollama", "Cloud API", "Extractive"], variable=summ_var,
                           width=150).pack(side="left", padx=(4, 0))
+        skim_var = ctk.BooleanVar(value=bool(pconfig_get("plot_skim", False)))
+        ParagonGradientCheckbox(row1b, text="Skim 30s/min (≈2× faster)",
+                                variable=skim_var).pack(side="left", padx=(16, 0))
 
         row2 = ctk.CTkFrame(ctrl, fg_color="transparent"); row2.pack(fill="x", padx=10, pady=(2, 4))
         ParagonLabel(row2, text="Ollama", style="muted", width=70, anchor="w").pack(side="left")
@@ -13850,7 +13866,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
 
         gen_state = {"running": False}
 
-        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel, beam):
+        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel, beam, skim):
             found = 0
             n = len(episodes)
             for i, ep in enumerate(episodes, 1):
@@ -13878,7 +13894,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     try:
                         transcript = AudioTranscriber.transcribe(ep['file'], wmodel,
                                                                  max_seconds=maxsec, progress_cb=_tp,
-                                                                 beam_size=beam)
+                                                                 beam_size=beam, skim=skim)
                     except Exception as e:
                         err = f"{type(e).__name__}: {e}"
                         print(f"transcribe error on {ep['file']}: {err}")
@@ -13963,7 +13979,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                         plot_ollama_model=ollama_model_e.get().strip(),
                         plot_cloud_base=cloud_base_e.get().strip(),
                         plot_cloud_key=cloud_key_e.get().strip(),
-                        plot_cloud_model=cloud_model_e.get().strip())
+                        plot_cloud_model=cloud_model_e.get().strip(),
+                        plot_skim=bool(skim_var.get()))
             if source == "Transcribe" and not AudioTranscriber.available():
                 messagebox.showwarning(
                     "faster-whisper not installed",
@@ -13978,7 +13995,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 ollama_url_e.get().strip() or "http://localhost:11434",
                 ollama_model_e.get().strip() or "llama3.1",
                 cloud_base_e.get().strip() or "https://api.openai.com/v1",
-                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini", beam),
+                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini", beam,
+                bool(skim_var.get())),
                 daemon=True).start()
 
         def _write():
