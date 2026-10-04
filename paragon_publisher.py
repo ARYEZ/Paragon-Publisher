@@ -12737,6 +12737,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         # Refresh button (force rescan)
         ParagonButton(header_inner, text="🔄 RESCAN", command=lambda: self._scan_library(force=True),
                      width=140, height=40).pack(side="right", padx=(10, 0))
+
+        # Batch: save folder.jpg for every album
+        ParagonButton(header_inner, text="🖼 SAVE ALL COVERS", command=self._save_all_covers,
+                     width=200, height=40,
+                     fg_color=ParagonTheme.BG_TERTIARY,
+                     hover_color=ParagonTheme.BG_HOVER).pack(side="right", padx=(10, 0))
         
         # Change folder button
         ParagonButton(header_inner, text="📁 CHANGE FOLDER", command=self._change_folder,
@@ -13138,14 +13144,37 @@ class MusicLibraryDialog(ctk.CTkToplevel):
     
     def _show_album_details(self, album: Dict):
         """Show album details and track list in right panel"""
-        # Header
+        # Action buttons — centered row across the top
+        btnbar = ctk.CTkFrame(self.right_panel, fg_color="transparent")
+        btnbar.pack(fill="x", padx=15, pady=(15, 10))
+        btnrow = ctk.CTkFrame(btnbar, fg_color="transparent")
+        btnrow.pack(anchor="center")
+        ParagonButton(btnrow, text="📝 OPEN TAG EDITOR",
+                     command=lambda: self._open_album_editor(album),
+                     width=190, height=42).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="🎵 SET GENRE",
+                     command=lambda: self._set_album_genre(album),
+                     width=160, height=42).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="🖼 SAVE COVER",
+                     command=lambda: self._save_album_cover(album),
+                     width=170, height=42,
+                     fg_color=ParagonTheme.BG_TERTIARY,
+                     hover_color=ParagonTheme.BG_HOVER).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="🔄 RESCAN ALBUM",
+                     command=lambda: self._rescan_album(album),
+                     width=170, height=42,
+                     fg_color=ParagonTheme.BG_TERTIARY,
+                     hover_color=ParagonTheme.BG_HOVER).pack(side="left", padx=6)
+
+        # Header: big cover + album info, below the buttons
         header = ctk.CTkFrame(self.right_panel, fg_color="transparent")
-        header.pack(fill="x", padx=15, pady=15)
-        
-        # Album cover if exists
-        cover_frame = ctk.CTkFrame(header, fg_color="transparent")
-        cover_frame.pack(side="left")
-        
+        header.pack(fill="x", padx=15, pady=(4, 12))
+
+        # Album cover (2x size, gold-framed)
+        cover_box = ctk.CTkFrame(header, fg_color=ParagonTheme.BG_TERTIARY, width=240, height=240,
+                                 corner_radius=8, border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        cover_box.pack(side="left", padx=(0, 25))
+        cover_box.pack_propagate(False)
         cover_loaded = False
         if HAS_PIL:
             for cover_name in ['cover.jpg', 'cover.png', 'folder.jpg', 'album.jpg', 'front.jpg']:
@@ -13153,68 +13182,39 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 if os.path.exists(cover_path):
                     try:
                         img = Image.open(cover_path)
-                        img.thumbnail((120, 120), Image.Resampling.LANCZOS)
+                        img.thumbnail((228, 228), Image.Resampling.LANCZOS)
                         photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
-                        cover_lbl = ctk.CTkLabel(cover_frame, image=photo, text="")
-                        cover_lbl.pack(side="left", padx=(0, 15))
+                        cover_lbl = ctk.CTkLabel(cover_box, image=photo, text="")
+                        cover_lbl.pack(expand=True)
                         cover_lbl._img = photo
                         cover_loaded = True
                         break
                     except:
                         pass
-        
         if not cover_loaded:
-            placeholder = ctk.CTkFrame(cover_frame, fg_color=ParagonTheme.BG_TERTIARY, 
-                                      width=120, height=120, corner_radius=6)
-            placeholder.pack(side="left", padx=(0, 15))
-            placeholder.pack_propagate(False)
-            ctk.CTkLabel(placeholder, text="No\nCover", 
+            ctk.CTkLabel(cover_box, text="No\nCover",
                         text_color=ParagonTheme.TEXT_MUTED,
-                        font=ctk.CTkFont(size=14)).pack(expand=True)
-        
-        # Album title and info
+                        font=ctk.CTkFont(family="Bebas Neue", size=22)).pack(expand=True)
+
+        # Album title and info (scaled up)
         title_frame = ctk.CTkFrame(header, fg_color="transparent")
-        title_frame.pack(side="left", fill="both", expand=True)
-        
+        title_frame.pack(side="left", fill="both", expand=True, anchor="n")
+
         ctk.CTkLabel(title_frame, text=album['name'],
-                    font=ctk.CTkFont(family="Bebas Neue", size=32),
+                    font=ctk.CTkFont(family="Bebas Neue", size=52),
                     text_color=ParagonTheme.TEXT_PRIMARY,
-                    anchor="w").pack(anchor="w")
-        
+                    anchor="w", justify="left").pack(anchor="w", pady=(6, 0))
+
         if self.selected_artist:
             ctk.CTkLabel(title_frame, text=self.selected_artist['name'],
-                        font=ctk.CTkFont(size=18),
+                        font=ctk.CTkFont(family="Bebas Neue", size=30),
                         text_color="#ffffff",
-                        anchor="w").pack(anchor="w")
-        
+                        anchor="w").pack(anchor="w", pady=(4, 0))
+
         ctk.CTkLabel(title_frame, text=f"{album['track_count']} tracks",
-                    font=ctk.CTkFont(size=16),
+                    font=ctk.CTkFont(family="Bebas Neue", size=24),
                     text_color=ParagonTheme.TEXT_MUTED,
-                    anchor="w").pack(anchor="w", pady=(5, 0))
-        
-        # Open editor button
-        ParagonButton(header, text="📝 OPEN TAG EDITOR", 
-                     command=lambda: self._open_album_editor(album),
-                     width=180, height=40).pack(side="right", anchor="n")
-        
-        # Rescan album button
-        ParagonButton(header, text="🔄 RESCAN ALBUM",
-                     command=lambda: self._rescan_album(album),
-                     width=160, height=40,
-                     fg_color=ParagonTheme.BG_TERTIARY,
-                     hover_color=ParagonTheme.BG_HOVER).pack(side="right", anchor="n", padx=(0, 10))
-
-        # Set-folder-genre button (propagate a genre to every track's tag + name)
-        ParagonButton(header, text="🎵 SET GENRE",
-                     command=lambda: self._set_album_genre(album),
-                     width=150, height=40).pack(side="right", anchor="n", padx=(0, 10))
-
-        # Save embedded cover art to the folder as folder.jpg
-        ParagonButton(header, text="🖼 SAVE COVER",
-                     command=lambda: self._save_album_cover(album),
-                     width=160, height=40,
-                     fg_color=ParagonTheme.BG_TERTIARY,
-                     hover_color=ParagonTheme.BG_HOVER).pack(side="right", anchor="n", padx=(0, 10))
+                    anchor="w").pack(anchor="w", pady=(8, 0))
         
         # Track list header
         track_header = ctk.CTkFrame(self.right_panel, fg_color="transparent")
@@ -13298,6 +13298,60 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             messagebox.showinfo("Saved", f"Cover saved as:\n{out}")
         else:
             messagebox.showerror("Error", "Failed to save folder.jpg (see console).")
+
+    def _save_all_covers(self):
+        """Batch: extract embedded cover art and save folder.jpg for every album
+        in the library (existing folder.jpg files are kept)."""
+        albums = []
+        for artist in getattr(self, 'artists', []):
+            for alb in artist.get('albums', []):
+                p = alb.get('path')
+                if p:
+                    albums.append(p)
+        if not albums:
+            messagebox.showinfo("No Albums", "No albums loaded.")
+            return
+        if not messagebox.askyesno(
+                "Save All Covers",
+                f"Extract embedded cover art and save folder.jpg for {len(albums)} album(s)?\n\n"
+                "Albums that already have a folder.jpg are skipped."):
+            return
+        audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
+
+        def run():
+            saved = skipped = nocover = 0
+            total = len(albums)
+            for i, folder in enumerate(albums):
+                if not folder or not os.path.isdir(folder):
+                    continue
+                out = os.path.join(folder, "folder.jpg")
+                if os.path.exists(out):
+                    skipped += 1
+                else:
+                    data = None
+                    try:
+                        for f in sorted(os.listdir(folder)):
+                            if os.path.splitext(f)[1].lower() in audio_ext:
+                                data = TagManager.read_cover_art(os.path.join(folder, f))
+                                if data:
+                                    break
+                    except Exception:
+                        data = None
+                    if data and _save_cover_jpg(data, out):
+                        saved += 1
+                    else:
+                        nocover += 1
+                if i % 4 == 0:
+                    self.after(0, lambda i=i, total=total:
+                               self.status_label.configure(text=f"Saving covers… {i + 1}/{total}"))
+            self.after(0, lambda: self.status_label.configure(
+                text=f"Covers: {saved} saved · {skipped} skipped · {nocover} no art"))
+            self.after(0, lambda: messagebox.showinfo(
+                "Done",
+                f"Saved {saved} folder.jpg\nSkipped {skipped} (already had one)\n"
+                f"No embedded art: {nocover}"))
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _set_album_genre(self, album: Dict):
         """Propagate a single genre to every track in the album folder — both the
