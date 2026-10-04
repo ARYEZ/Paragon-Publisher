@@ -3778,10 +3778,11 @@ class ParagonGradientCheckbox(tk.Canvas):
     """A checkbox whose box shows the Paragon gradient when checked (Canvas-based,
     since CTk can't paint a gradient). Drop-in for ParagonCheckbox's common use:
     supports text, variable, command and .get()."""
-    def __init__(self, master, text="", variable=None, command=None, box=22, **kwargs):
+    def __init__(self, master, text="", variable=None, command=None, box=20, **kwargs):
         for k in ('fg_color', 'hover_color', 'border_color', 'checkmark_color',
                   'text_color', 'font', 'corner_radius', 'checkbox_width',
-                  'checkbox_height'):
+                  'checkbox_height', 'width', 'height', 'state', 'bg_color',
+                  'onvalue', 'offvalue'):
             kwargs.pop(k, None)
         self._text = text
         self._box = box
@@ -3792,8 +3793,8 @@ class ParagonGradientCheckbox(tk.Canvas):
         except Exception:
             self._font = ("Segoe UI", 15)
             tw = len(text) * 9
-        w = box + 10 + tw + 8
-        h = max(box + 6, 30)
+        w = box + 12 + tw + 16
+        h = 36
         super().__init__(master, width=w, height=h, bg=ParagonTheme.BG_DARK,
                          highlightthickness=0, bd=0, **kwargs)
         self._var = variable if variable is not None else ctk.BooleanVar(value=False)
@@ -3804,6 +3805,7 @@ class ParagonGradientCheckbox(tk.Canvas):
         except Exception:
             pass
         self.bind("<Button-1>", self._toggle)
+        self.bind("<Configure>", self._draw)
         try:
             self._var.trace_add("write", lambda *a: self._draw())
         except Exception:
@@ -5470,7 +5472,7 @@ class TagEditorPanel(ctk.CTkFrame):
         ext_header.pack(fill="x", pady=(20, 10))
         
         self.extended_visible = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             ext_header,
             text="Show Extended Tags",
             variable=self.extended_visible,
@@ -6077,7 +6079,7 @@ class TagEditorDialog(ctk.CTkToplevel):
             
             # Apply to all checkbox
             self.apply_all = ctk.BooleanVar(value=False)
-            ctk.CTkCheckBox(
+            ParagonGradientCheckbox(
                 nav_frame, text="Apply changes to all files",
                 variable=self.apply_all,
                 fg_color=ParagonTheme.RED_PRIMARY,
@@ -6564,7 +6566,7 @@ class TagEditorDialog(ctk.CTkToplevel):
                 frame = ctk.CTkFrame(fields_frame, fg_color="transparent")
                 frame.pack(fill="x", pady=3)
                 
-                cb = ctk.CTkCheckBox(frame, text=label, variable=var,
+                cb = ParagonGradientCheckbox(frame, text=label, variable=var,
                                     fg_color=ParagonTheme.RED_PRIMARY,
                                     hover_color=ParagonTheme.RED_LIGHT,
                                     font=ctk.CTkFont(size=16))
@@ -6583,7 +6585,7 @@ class TagEditorDialog(ctk.CTkToplevel):
                                ("Record Label", label_var, getattr(self, 'selected_labels', set()))):
             frame = ctk.CTkFrame(fields_frame, fg_color="transparent")
             frame.pack(fill="x", pady=3)
-            ctk.CTkCheckBox(frame, text=cap, variable=var,
+            ParagonGradientCheckbox(frame, text=cap, variable=var,
                             fg_color=ParagonTheme.RED_PRIMARY,
                             hover_color=ParagonTheme.RED_LIGHT,
                             font=ctk.CTkFont(size=16)).pack(side="left")
@@ -6598,7 +6600,7 @@ class TagEditorDialog(ctk.CTkToplevel):
         cover_frame = ctk.CTkFrame(fields_frame, fg_color="transparent")
         cover_frame.pack(fill="x", pady=3)
         
-        ctk.CTkCheckBox(cover_frame, text="Cover Art", variable=cover_var,
+        ParagonGradientCheckbox(cover_frame, text="Cover Art", variable=cover_var,
                        fg_color=ParagonTheme.RED_PRIMARY,
                        hover_color=ParagonTheme.RED_LIGHT,
                        font=ctk.CTkFont(size=16)).pack(side="left")
@@ -6932,7 +6934,7 @@ class MusicBrainzDialog(ctk.CTkToplevel):
         
         # Fetch cover checkbox
         self.fetch_cover = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             right_preview, text="Fetch cover art",
             variable=self.fetch_cover,
             fg_color=ParagonTheme.RED_PRIMARY,
@@ -7356,7 +7358,7 @@ class MusicBrainzAlbumLookup(ctk.CTkToplevel):
         
         # Fetch cover checkbox
         self.fetch_cover = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             btn_frame, text="Include cover art",
             variable=self.fetch_cover,
             fg_color=ParagonTheme.RED_PRIMARY,
@@ -7915,28 +7917,28 @@ class MovieScraperDialog(ctk.CTkToplevel):
         options_frame1.pack(fill="x", padx=15, pady=(0, 5))
         
         self.download_poster = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame1, text="poster.jpg",
             variable=self.download_poster,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.download_fanart = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame1, text="fanart.jpg",
             variable=self.download_fanart,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.download_landscape = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame1, text="landscape.jpg",
             variable=self.download_landscape,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.download_logo = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame1, text="logo.png",
             variable=self.download_logo,
             fg_color=ParagonTheme.RED_PRIMARY
@@ -7947,14 +7949,14 @@ class MovieScraperDialog(ctk.CTkToplevel):
         options_frame2.pack(fill="x", padx=15, pady=(0, 10))
         
         self.create_nfo = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame2, text="Create NFO",
             variable=self.create_nfo,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.rename_file = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame2, text="Rename file",
             variable=self.rename_file,
             fg_color=ParagonTheme.RED_PRIMARY
@@ -9614,19 +9616,19 @@ class MovieEditorDialog(ctk.CTkToplevel):
         opts.pack(fill="x", padx=8)
         
         self.dl_poster = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opts, text="Poster", variable=self.dl_poster, fg_color=ParagonTheme.RED_PRIMARY,
+        ParagonGradientCheckbox(opts, text="Poster", variable=self.dl_poster, fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_fanart = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opts, text="Fanart", variable=self.dl_fanart, fg_color=ParagonTheme.RED_PRIMARY,
+        ParagonGradientCheckbox(opts, text="Fanart", variable=self.dl_fanart, fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_logo = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opts, text="Logo", variable=self.dl_logo, fg_color=ParagonTheme.RED_PRIMARY,
+        ParagonGradientCheckbox(opts, text="Logo", variable=self.dl_logo, fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_landscape = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opts, text="Landscape", variable=self.dl_landscape, fg_color=ParagonTheme.RED_PRIMARY,
+        ParagonGradientCheckbox(opts, text="Landscape", variable=self.dl_landscape, fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.create_nfo = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opts, text="Create NFO", variable=self.create_nfo, fg_color=ParagonTheme.RED_PRIMARY,
+        ParagonGradientCheckbox(opts, text="Create NFO", variable=self.create_nfo, fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=(12, 3))
     
     def _open_image_chooser(self, image_type: str):
@@ -10238,21 +10240,21 @@ class TVScraperDialog(ctk.CTkToplevel):
         options_frame.pack(fill="x", padx=20, pady=(0, 5))
         
         self.download_poster = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame, text="Download poster",
             variable=self.download_poster,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.create_nfo = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame, text="Create NFO files",
             variable=self.create_nfo,
             fg_color=ParagonTheme.RED_PRIMARY
         ).pack(side="left", padx=(0, 15))
         
         self.rename_files = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
+        ParagonGradientCheckbox(
             options_frame, text="Rename files",
             variable=self.rename_files,
             fg_color=ParagonTheme.RED_PRIMARY
@@ -11708,7 +11710,7 @@ class FileLibraryDialog(ctk.CTkToplevel):
         
         # Include subfolders checkbox
         self.include_subfolders = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(count_frame, text="Include subfolders", variable=self.include_subfolders,
+        ParagonGradientCheckbox(count_frame, text="Include subfolders", variable=self.include_subfolders,
                        command=self._scan_folder,
                        fg_color=ParagonTheme.RED_PRIMARY,
                        font=ctk.CTkFont(size=14)).pack(side="right")
@@ -16662,9 +16664,9 @@ class PyRenamerApp(DnDCTk):
         ParagonLabel(options_frame, text="OPTIONS", style="header").pack(anchor="w", padx=15, pady=(10, 5))
         # NOTE: renaming never touches the file extension (self.include_extension
         # stays False), so there is deliberately no "include extension" option.
-        ParagonCheckbox(options_frame, text="Include folders",
+        ParagonGradientCheckbox(options_frame, text="Include folders",
                        variable=self.include_folders).pack(anchor="w", padx=15, pady=3)
-        ParagonCheckbox(options_frame, text="Scan subfolders (recursive)",
+        ParagonGradientCheckbox(options_frame, text="Scan subfolders (recursive)",
                        variable=self.recursive_scan).pack(anchor="w", padx=15, pady=(3, 10))
 
         # Rule tabs (Replace … Tags) fill the middle of the left box
@@ -16715,8 +16717,8 @@ class PyRenamerApp(DnDCTk):
         ParagonLabel(parent, text="Replace with:", style="muted").pack(anchor="w", padx=10, pady=(15, 5))
         ParagonEntry(parent, textvariable=self.replace_with, placeholder_text="Replacement text...", width=350).pack(anchor="w", padx=10)
         
-        ParagonCheckbox(parent, text="Use Regular Expressions", variable=self.replace_regex).pack(anchor="w", padx=10, pady=(15, 5))
-        ParagonCheckbox(parent, text="Case Sensitive", variable=self.replace_case).pack(anchor="w", padx=10, pady=5)
+        ParagonGradientCheckbox(parent, text="Use Regular Expressions", variable=self.replace_regex).pack(anchor="w", padx=10, pady=(15, 5))
+        ParagonGradientCheckbox(parent, text="Case Sensitive", variable=self.replace_case).pack(anchor="w", padx=10, pady=5)
     
     def _create_remove_tab(self, parent):
         """Remove rule tab"""
@@ -16730,14 +16732,14 @@ class PyRenamerApp(DnDCTk):
         ParagonLabel(pos_frame, text="Count:", style="muted").pack(side="left")
         ParagonEntry(pos_frame, textvariable=self.remove_count, width=80).pack(side="left", padx=10)
         
-        ParagonCheckbox(parent, text="Count from end", variable=self.remove_from_end).pack(anchor="w", padx=10, pady=5)
+        ParagonGradientCheckbox(parent, text="Count from end", variable=self.remove_from_end).pack(anchor="w", padx=10, pady=5)
         
         # Separator
         ctk.CTkFrame(parent, fg_color=ParagonTheme.BORDER_DARK, height=1).pack(fill="x", padx=10, pady=15)
         
         ParagonLabel(parent, text="Remove character types:", style="muted").pack(anchor="w", padx=10, pady=(0, 10))
-        ParagonCheckbox(parent, text="Digits (0-9)", variable=self.remove_digits).pack(anchor="w", padx=20, pady=3)
-        ParagonCheckbox(parent, text="Spaces", variable=self.remove_spaces).pack(anchor="w", padx=20, pady=3)
+        ParagonGradientCheckbox(parent, text="Digits (0-9)", variable=self.remove_digits).pack(anchor="w", padx=20, pady=3)
+        ParagonGradientCheckbox(parent, text="Spaces", variable=self.remove_spaces).pack(anchor="w", padx=20, pady=3)
         
         # Separator
         ctk.CTkFrame(parent, fg_color=ParagonTheme.BORDER_DARK, height=1).pack(fill="x", padx=10, pady=15)
@@ -16745,13 +16747,13 @@ class PyRenamerApp(DnDCTk):
         # Illegal/special characters section
         ParagonLabel(parent, text="Remove illegal/special characters:", style="muted").pack(anchor="w", padx=10, pady=(0, 10))
         
-        ParagonCheckbox(parent, text='Illegal file chars:  \\ / : * ? " < > |', 
+        ParagonGradientCheckbox(parent, text='Illegal file chars:  \\ / : * ? " < > |', 
                        variable=self.remove_illegal).pack(anchor="w", padx=20, pady=3)
-        ParagonCheckbox(parent, text="Brackets:  ( ) [ ] { }", 
+        ParagonGradientCheckbox(parent, text="Brackets:  ( ) [ ] { }", 
                        variable=self.remove_brackets).pack(anchor="w", padx=20, pady=3)
-        ParagonCheckbox(parent, text="Punctuation:  ! @ # $ % ^ & ~ ` ; ' ,", 
+        ParagonGradientCheckbox(parent, text="Punctuation:  ! @ # $ % ^ & ~ ` ; ' ,", 
                        variable=self.remove_punctuation).pack(anchor="w", padx=20, pady=3)
-        ParagonCheckbox(parent, text="All non-alphanumeric (keep spaces)", 
+        ParagonGradientCheckbox(parent, text="All non-alphanumeric (keep spaces)", 
                        variable=self.remove_all_special).pack(anchor="w", padx=20, pady=3)
     
     def _create_insert_tab(self, parent):
@@ -16765,7 +16767,7 @@ class PyRenamerApp(DnDCTk):
         ParagonLabel(pos_frame, text="At position:", style="muted").pack(side="left")
         ParagonEntry(pos_frame, textvariable=self.insert_pos, width=80).pack(side="left", padx=10)
         
-        ParagonCheckbox(parent, text="Count from end", variable=self.insert_from_end).pack(anchor="w", padx=10, pady=10)
+        ParagonGradientCheckbox(parent, text="Count from end", variable=self.insert_from_end).pack(anchor="w", padx=10, pady=10)
     
     def _create_case_tab(self, parent):
         """Case change tab"""
@@ -16794,7 +16796,7 @@ class PyRenamerApp(DnDCTk):
         swap_frame = ctk.CTkFrame(parent, fg_color="transparent")
         swap_frame.pack(fill="x", padx=10, pady=5)
         
-        ParagonCheckbox(swap_frame, text="Swap around delimiter:", 
+        ParagonGradientCheckbox(swap_frame, text="Swap around delimiter:", 
                        variable=self.swap_enabled).pack(side="left")
         ParagonEntry(swap_frame, textvariable=self.swap_delimiter, width=80).pack(side="left", padx=10)
         
@@ -16806,7 +16808,7 @@ class PyRenamerApp(DnDCTk):
     
     def _create_number_tab(self, parent):
         """Number rule tab"""
-        ParagonCheckbox(parent, text="Add sequential numbers", variable=self.number_enabled).pack(anchor="w", padx=10, pady=(15, 10))
+        ParagonGradientCheckbox(parent, text="Add sequential numbers", variable=self.number_enabled).pack(anchor="w", padx=10, pady=(15, 10))
         
         # Settings grid
         settings = ctk.CTkFrame(parent, fg_color="transparent")
@@ -16832,7 +16834,7 @@ class PyRenamerApp(DnDCTk):
     
     def _create_tv_tab(self, parent):
         """TV Show season/episode rule tab"""
-        ParagonCheckbox(parent, text="Enable TV Show numbering", variable=self.tv_enabled).pack(anchor="w", padx=10, pady=(15, 10))
+        ParagonGradientCheckbox(parent, text="Enable TV Show numbering", variable=self.tv_enabled).pack(anchor="w", padx=10, pady=(15, 10))
         
         # Season and Episode row
         se_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -16877,7 +16879,7 @@ class PyRenamerApp(DnDCTk):
         # Show name option
         ctk.CTkFrame(parent, fg_color=ParagonTheme.BORDER_DARK, height=1).pack(fill="x", padx=10, pady=10)
         
-        ParagonCheckbox(parent, text="Include show name", variable=self.tv_include_show).pack(anchor="w", padx=10, pady=3)
+        ParagonGradientCheckbox(parent, text="Include show name", variable=self.tv_include_show).pack(anchor="w", padx=10, pady=3)
         ParagonEntry(parent, textvariable=self.tv_show_name, placeholder_text="Show Name", width=250).pack(anchor="w", padx=10, pady=3)
         
         # Help text
@@ -16887,7 +16889,7 @@ class PyRenamerApp(DnDCTk):
     
     def _create_datetime_tab(self, parent):
         """Date/time rule tab"""
-        ParagonCheckbox(parent, text="Add date/time", variable=self.datetime_enabled).pack(anchor="w", padx=10, pady=(15, 10))
+        ParagonGradientCheckbox(parent, text="Add date/time", variable=self.datetime_enabled).pack(anchor="w", padx=10, pady=(15, 10))
         
         ParagonLabel(parent, text="Format:", style="muted").pack(anchor="w", padx=10, pady=(10, 5))
         ParagonOptionMenu(parent, variable=self.datetime_format,
@@ -16906,7 +16908,7 @@ class PyRenamerApp(DnDCTk):
     
     def _create_metadata_tab(self, parent):
         """Metadata rule tab"""
-        ParagonCheckbox(parent, text="Rename by metadata", variable=self.metadata_enabled).pack(anchor="w", padx=10, pady=(15, 10))
+        ParagonGradientCheckbox(parent, text="Rename by metadata", variable=self.metadata_enabled).pack(anchor="w", padx=10, pady=(15, 10))
         
         ParagonLabel(parent, text="Template:", style="muted").pack(anchor="w", padx=10, pady=(10, 5))
         ParagonEntry(parent, textvariable=self.metadata_template, placeholder_text="{artist} - {title}", width=350).pack(anchor="w", padx=10)
@@ -20109,9 +20111,9 @@ class HarvesterDialog(ctk.CTkToplevel):
         self.genre_entry.insert(0, cfg.get("harvester_genre", ""))
         self.genre_entry.pack(side="left", padx=(6, 16))
         ParagonLabel(gc, text="YouTube channel", style="muted", anchor="w").pack(side="left")
-        self.channel_entry = ParagonEntry(gc, width=240, height=38)
+        self.channel_entry = ParagonEntry(gc, width=520, height=38)
         self.channel_entry.insert(0, cfg.get("harvester_channel", ""))
-        self.channel_entry.pack(side="left", padx=(6, 0))
+        self.channel_entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         # Match-playlist row: recover the exact video (for its plot/metadata) by
         # matching a filename fragment against this playlist's real titles. Blank
