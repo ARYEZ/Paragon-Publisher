@@ -11262,7 +11262,8 @@ class TVLibraryDialog(ctk.CTkToplevel):
         if show.get('poster_path') and HAS_PIL:
             try:
                 img = Image.open(show['poster_path'])
-                img.thumbnail((300, 450), Image.Resampling.LANCZOS)
+                # Slightly smaller than the 300x450 frame so the gold border shows
+                img.thumbnail((288, 438), Image.Resampling.LANCZOS)
                 photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
                 lbl = ctk.CTkLabel(poster_frame, image=photo, text="")
                 lbl.pack(expand=True)
