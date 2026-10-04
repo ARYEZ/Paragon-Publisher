@@ -6098,19 +6098,147 @@ class TagEditorDialog(ctk.CTkToplevel):
             ('year', 'Year'),
             ('track', 'Track'),
             ('discnumber', 'Disc'),
-            ('genre', 'Genre'),
             ('bpm', 'BPM'),
         ]
-        
+
         for field, label in left_fields:
             self._add_field(left, field, label)
-        
+
         for field, label in right_fields:
             self._add_field(right, field, label)
-        
+
         # Comment (full width)
         self._add_field(scroll, 'comment', 'Comment', full_width=True)
-    
+
+        # Genre — gradient chips (instead of a plain text field)
+        self.selected_genres = set()
+        self.selected_labels = set()
+        ParagonLabel(scroll, text="Genre", style="header").pack(anchor="w", pady=(14, 8))
+        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.genres_frame.pack(fill="x", pady=(0, 14))
+        self._create_music_genre_chips()
+
+        # Record Label — editable gradient chips (stored in the publisher tag)
+        ParagonLabel(scroll, text="Record Label", style="header").pack(anchor="w", pady=(0, 8))
+        self.labels_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.labels_frame.pack(fill="x", pady=(0, 14))
+        self._create_label_chips()
+
+    def _chip_width(self, text):
+        return max(84, int(len(str(text)) * 11) + 26)
+
+    def _create_music_genre_chips(self):
+        if not hasattr(self, 'genres_frame'):
+            return
+        for widget in self.genres_frame.winfo_children():
+            widget.destroy()
+        try:
+            all_genres = MovieEditorDialog.get_all_genres()
+        except Exception:
+            all_genres = []
+        # Include any selected genres that aren't in the known list
+        for g in sorted(self.selected_genres):
+            if g not in all_genres:
+                all_genres = list(all_genres) + [g]
+        row_frame = None
+        for i, genre in enumerate(all_genres):
+            if i % 5 == 0:
+                row_frame = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
+                row_frame.pack(fill="x", padx=10, pady=4)
+            btn = ParagonButton(
+                row_frame, text=genre, height=34, width=self._chip_width(genre),
+                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
+                command=lambda g=genre: self._toggle_music_genre(g)
+            )
+            btn.pack(side="left", padx=4, pady=4)
+            btn.set_selected(genre in self.selected_genres)
+        add_row = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+        self.custom_genre_entry = ctk.CTkEntry(
+            add_row, width=220, height=36, placeholder_text="New genre...",
+            font=ctk.CTkFont(size=14)
+        )
+        self.custom_genre_entry.pack(side="left", padx=4)
+        self.custom_genre_entry.bind("<Return>", lambda e: self._add_music_genre())
+        ParagonButton(add_row, text="+ ADD", height=36, width=90, corner_radius=8,
+                      fg_color=ParagonTheme.RED_PRIMARY,
+                      command=self._add_music_genre).pack(side="left", padx=4)
+
+    def _toggle_music_genre(self, genre):
+        if genre in self.selected_genres:
+            self.selected_genres.discard(genre)
+        else:
+            self.selected_genres.add(genre)
+        self._create_music_genre_chips()
+
+    def _add_music_genre(self):
+        genre = self.custom_genre_entry.get().strip()
+        if not genre:
+            return
+        try:
+            MovieEditorDialog.add_custom_genre(genre)
+        except Exception:
+            pass
+        self.selected_genres.add(genre)
+        self._create_music_genre_chips()
+
+    def _create_label_chips(self):
+        if not hasattr(self, 'labels_frame'):
+            return
+        for widget in self.labels_frame.winfo_children():
+            widget.destroy()
+        labels = sorted(self.selected_labels)
+        if labels:
+            row_frame = None
+            for i, label in enumerate(labels):
+                if i % 3 == 0:
+                    row_frame = ctk.CTkFrame(self.labels_frame, fg_color="transparent")
+                    row_frame.pack(fill="x", padx=10, pady=4)
+                btn = ParagonButton(
+                    row_frame, text=f"{label}  ✕", height=34,
+                    width=self._chip_width(label) + 20,
+                    fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
+                    command=lambda s=label: self._remove_label(s)
+                )
+                btn.pack(side="left", padx=4, pady=4)
+                btn.set_selected(True)
+        else:
+            ctk.CTkLabel(self.labels_frame, text="No record label yet — add one below",
+                         text_color=ParagonTheme.TEXT_SECONDARY,
+                         font=ctk.CTkFont(size=14)).pack(anchor="w", padx=12, pady=(10, 2))
+        add_row = ctk.CTkFrame(self.labels_frame, fg_color="transparent")
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+        self.custom_label_entry = ctk.CTkEntry(
+            add_row, width=260, height=36, placeholder_text="New record label...",
+            font=ctk.CTkFont(size=14)
+        )
+        self.custom_label_entry.pack(side="left", padx=4)
+        self.custom_label_entry.bind("<Return>", lambda e: self._add_label())
+        ParagonButton(add_row, text="+ ADD", height=36, width=90, corner_radius=8,
+                      fg_color=ParagonTheme.RED_PRIMARY,
+                      command=self._add_label).pack(side="left", padx=4)
+
+    def _add_label(self):
+        label = self.custom_label_entry.get().strip()
+        if not label:
+            return
+        self.selected_labels.add(label)
+        self._create_label_chips()
+
+    def _remove_label(self, label):
+        self.selected_labels.discard(label)
+        self._create_label_chips()
+
+    @staticmethod
+    def _split_multi(value):
+        """Split a tag value that may contain multiple items (; / , separators)."""
+        if not value:
+            return set()
+        parts = re.split(r'[;/,]', str(value))
+        return {p.strip() for p in parts if p.strip()}
+
     def _add_field(self, parent, field_name: str, label_text: str, full_width: bool = False):
         """Add a tag input field"""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -6163,7 +6291,13 @@ class TagEditorDialog(ctk.CTkToplevel):
                 entry.insert(0, str(tags[field]))
             else:
                 print(f"  Field {field} not in tags")
-        
+
+        # Genre + Record Label are chips, not text fields
+        self.selected_genres = self._split_multi(tags.get('genre'))
+        self.selected_labels = self._split_multi(tags.get('publisher'))
+        self._create_music_genre_chips()
+        self._create_label_chips()
+
         # Load cover
         self._load_cover(filepath)
         
@@ -6244,7 +6378,13 @@ class TagEditorDialog(ctk.CTkToplevel):
             value = entry.get().strip()
             if value:
                 tags[field] = value
-        
+
+        # Genre + Record Label come from the chips
+        if hasattr(self, 'selected_genres'):
+            tags['genre'] = "; ".join(sorted(self.selected_genres))
+        if hasattr(self, 'selected_labels'):
+            tags['publisher'] = "; ".join(sorted(self.selected_labels))
+
         if hasattr(self, 'apply_all') and self.apply_all.get():
             # Apply to all files
             success = 0
@@ -6307,7 +6447,6 @@ class TagEditorDialog(ctk.CTkToplevel):
             'year': 'Year',
             'track': 'Track',
             'discnumber': 'Disc',
-            'genre': 'Genre',
             'bpm': 'BPM',
             'comment': 'Comment'
         }
@@ -6333,6 +6472,23 @@ class TagEditorDialog(ctk.CTkToplevel):
                             font=ctk.CTkFont(size=14),
                             text_color=ParagonTheme.TEXT_MUTED if value else ParagonTheme.TEXT_SECONDARY).pack(side="left", padx=(10, 0))
         
+        # Genre + Record Label (chips) as their own checkboxes
+        genre_var = ctk.BooleanVar(value=False)
+        label_var = ctk.BooleanVar(value=False)
+        for cap, var, vals in (("Genre", genre_var, getattr(self, 'selected_genres', set())),
+                               ("Record Label", label_var, getattr(self, 'selected_labels', set()))):
+            frame = ctk.CTkFrame(fields_frame, fg_color="transparent")
+            frame.pack(fill="x", pady=3)
+            ctk.CTkCheckBox(frame, text=cap, variable=var,
+                            fg_color=ParagonTheme.RED_PRIMARY,
+                            hover_color=ParagonTheme.RED_LIGHT,
+                            font=ctk.CTkFont(size=16)).pack(side="left")
+            disp = ", ".join(sorted(vals))
+            disp = disp if len(disp) < 30 else disp[:27] + "..."
+            ctk.CTkLabel(frame, text=f"= {disp}" if vals else "(empty)",
+                         font=ctk.CTkFont(size=14),
+                         text_color=ParagonTheme.TEXT_MUTED if vals else ParagonTheme.TEXT_SECONDARY).pack(side="left", padx=(10, 0))
+
         # Cover art checkbox
         cover_var = ctk.BooleanVar(value=False)
         cover_frame = ctk.CTkFrame(fields_frame, fg_color="transparent")
@@ -6355,11 +6511,15 @@ class TagEditorDialog(ctk.CTkToplevel):
         def select_all():
             for var in field_vars.values():
                 var.set(True)
+            genre_var.set(True)
+            label_var.set(True)
             cover_var.set(True)
-        
+
         def select_none():
             for var in field_vars.values():
                 var.set(False)
+            genre_var.set(False)
+            label_var.set(False)
             cover_var.set(False)
         
         ctk.CTkButton(select_frame, text="Select All", width=100, height=32,
@@ -6384,7 +6544,11 @@ class TagEditorDialog(ctk.CTkToplevel):
                     value = self.tag_entries[field].get().strip()
                     if value:
                         tags_to_save[field] = value
-            
+            if genre_var.get():
+                tags_to_save['genre'] = "; ".join(sorted(getattr(self, 'selected_genres', set())))
+            if label_var.get():
+                tags_to_save['publisher'] = "; ".join(sorted(getattr(self, 'selected_labels', set())))
+
             save_cover = cover_var.get() and has_cover
             
             if not tags_to_save and not save_cover:
@@ -6489,7 +6653,15 @@ class TagEditorDialog(ctk.CTkToplevel):
             if field in self.tag_entries and value:
                 self.tag_entries[field].delete(0, 'end')
                 self.tag_entries[field].insert(0, value)
-        
+
+        # Genre + label are chips now
+        if tags.get('genre'):
+            self.selected_genres = self._split_multi(tags.get('genre'))
+            self._create_music_genre_chips()
+        if tags.get('publisher'):
+            self.selected_labels = self._split_multi(tags.get('publisher'))
+            self._create_label_chips()
+
         # Update cover art if provided
         if cover_data and HAS_PIL:
             try:
