@@ -4094,7 +4094,7 @@ class GradientBorder(tk.Canvas):
     the gradient shows only as a border frame around it. The child is embedded
     via a canvas window (not place) because CTk widgets reject width/height in
     place()."""
-    def __init__(self, master, bw=1, radius=6, height=36, width=200, **kw):
+    def __init__(self, master, bw=1, radius=8, height=36, width=200, **kw):
         super().__init__(master, highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK,
                          height=height, width=width, **kw)
         self._bw = bw
@@ -4117,9 +4117,7 @@ class GradientBorder(tk.Canvas):
             if w < 4 or h < 4:
                 return
             self.delete("grad")
-            photo = make_gradient_photo(w, h, left_hex="#d81d45",
-                                        right_hex=ParagonTheme.GOLD,
-                                        radius=self._radius, gloss=False, border_hex=None)
+            photo = make_gradient_ring_photo(w, h, bw=self._bw, radius=self._radius)
             if photo is not None:
                 self._photo = photo
                 self.create_image(0, 0, image=photo, anchor="nw", tags="grad")
@@ -10362,6 +10360,45 @@ def make_gradient_photo(width, height, **kw):
         return photo
     except Exception as e:
         print(f"Gradient photo failed: {e}")
+        return None
+
+
+_RING_CACHE = {}
+
+
+def make_gradient_ring_photo(width, height, bw=1, radius=8):
+    """Tk PhotoImage of a rounded Paragon gradient *ring* — rounded on the
+    outside and the inside, with a transparent interior — for use as a gradient
+    border frame around a widget. Cached."""
+    width = max(4, int(width))
+    height = max(4, int(height))
+    bw = max(1, int(bw))
+    radius = max(0, int(radius))
+    key = (width, height, bw, radius)
+    cached = _RING_CACHE.get(key)
+    if cached is not None:
+        return cached
+    if not HAS_PIL:
+        return None
+    try:
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageChops as _ImageChops, ImageTk
+        grad = _build_gradient_pil(width, height, radius=radius, border_hex=None, gloss=False)
+        if grad is None:
+            return None
+        outer = _Image.new("L", (width, height), 0)
+        _ImageDraw.Draw(outer).rounded_rectangle(
+            [0, 0, width - 1, height - 1], radius=radius, fill=255)
+        inner = _Image.new("L", (width, height), 0)
+        _ImageDraw.Draw(inner).rounded_rectangle(
+            [bw, bw, width - 1 - bw, height - 1 - bw],
+            radius=max(0, radius - bw), fill=255)
+        ring = _ImageChops.subtract(outer, inner)
+        grad.putalpha(ring)
+        photo = ImageTk.PhotoImage(grad)
+        _RING_CACHE[key] = photo
+        return photo
+    except Exception as e:
+        print(f"Gradient ring failed: {e}")
         return None
 
 
