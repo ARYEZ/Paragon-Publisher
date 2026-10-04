@@ -13154,7 +13154,13 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                      width=190, height=42).pack(side="left", padx=6)
         ParagonButton(btnrow, text="🎵 SET GENRE",
                      command=lambda: self._set_album_genre(album),
-                     width=160, height=42).pack(side="left", padx=6)
+                     width=150, height=42).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="💿 SET ALBUM",
+                     command=lambda: self._set_album_album(album),
+                     width=150, height=42).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="🎼 SET TITLE",
+                     command=lambda: self._set_album_title(album),
+                     width=150, height=42).pack(side="left", padx=6)
         ParagonButton(btnrow, text="🖼 SAVE COVER",
                      command=lambda: self._save_album_cover(album),
                      width=170, height=42,
@@ -13353,9 +13359,26 @@ class MusicLibraryDialog(ctk.CTkToplevel):
 
         threading.Thread(target=run, daemon=True).start()
 
+    # Filename convention: "<artist> - <title> - <album> - <genre> - <year> - <format> - <bitrate>"
+    # so the fields sit at these " - " positions counted from the end.
+    _FIELD_SEG = {'title': -6, 'album': -5, 'genre': -4}
+
     def _set_album_genre(self, album: Dict):
-        """Propagate a single genre to every track in the album folder — both the
-        genre tag and the genre segment in the filename."""
+        self._set_album_field(album, 'genre')
+
+    def _set_album_album(self, album: Dict):
+        self._set_album_field(album, 'album')
+
+    def _set_album_title(self, album: Dict):
+        self._set_album_field(album, 'title')
+
+    def _set_album_field(self, album: Dict, field: str):
+        """Find/replace one value for <field> (genre/album/title) across the album
+        folder — rewriting both the tag and the matching filename segment, exactly
+        like Set Genre."""
+        nice = field.capitalize()
+        seg = self._FIELD_SEG.get(field, -4)
+        need = abs(seg)
         audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
         folder = album['path']
         try:
@@ -13367,79 +13390,91 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             messagebox.showinfo("No tracks", "No audio files found in this album folder.")
             return
 
-        # Filenames follow "... - <genre> - <year> - <format> - <bitrate>", so the
-        # genre is the 4th-from-last " - " segment.
-        def _fn_genre(path):
+        def _fn_field(path):
             base = os.path.splitext(os.path.basename(path))[0]
             parts = base.split(" - ")
-            return parts[-4].strip() if len(parts) >= 4 else ""
+            return parts[seg].strip() if len(parts) >= need else ""
         from collections import Counter
-        fn_genres = [g for g in (_fn_genre(f) for f in files) if g]
-        old_guess = Counter(fn_genres).most_common(1)[0][0] if fn_genres else ""
-        # New genre = whatever genre tag differs from the filename (i.e. the one
-        # the user just updated), else the first track's tag.
+        fn_vals = [v for v in (_fn_field(f) for f in files) if v]
+        old_guess = Counter(fn_vals).most_common(1)[0][0] if fn_vals else ""
+        # New value = the tag that differs from the filename (i.e. the one just
+        # updated), else the first track's tag.
         new_guess = ""
         try:
             for f in files:
-                g = (TagManager.read_tags(f).get('genre') or "").strip()
+                g = (TagManager.read_tags(f).get(field) or "").strip()
                 if g and g != old_guess:
                     new_guess = g
                     break
             if not new_guess:
-                new_guess = (TagManager.read_tags(files[0]).get('genre') or "").strip() or old_guess
+                new_guess = (TagManager.read_tags(files[0]).get(field) or "").strip() or old_guess
         except Exception:
             new_guess = old_guess
 
         dlg = ctk.CTkToplevel(self)
-        dlg.title("Set Folder Genre")
+        dlg.title(f"Set Folder {nice}")
         dlg.geometry("560x340")
         dlg.transient(self)
         outer = ctk.CTkFrame(dlg, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
         outer.pack(fill="both", expand=True, padx=4, pady=4)
         inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
         inner.pack(fill="both", expand=True, padx=2, pady=2)
-        ParagonLabel(inner, text="SET FOLDER GENRE", style="header").pack(anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text=f"SET FOLDER {nice.upper()}", style="header").pack(anchor="w", padx=16, pady=(14, 2))
         ParagonLabel(inner, text=f"{album['name']} · {len(files)} tracks",
                      style="muted").pack(anchor="w", padx=16, pady=(0, 12))
 
         r1 = ctk.CTkFrame(inner, fg_color="transparent"); r1.pack(fill="x", padx=16, pady=4)
-        ParagonLabel(r1, text="Current genre", style="muted", width=140, anchor="w").pack(side="left")
+        ParagonLabel(r1, text=f"Current {field}", style="muted", width=140, anchor="w").pack(side="left")
         old_e = ParagonEntry(r1, height=38); old_e.pack(side="left", fill="x", expand=True)
         if old_guess:
             old_e.insert(0, old_guess)
 
         r2 = ctk.CTkFrame(inner, fg_color="transparent"); r2.pack(fill="x", padx=16, pady=4)
-        ParagonLabel(r2, text="New genre", style="muted", width=140, anchor="w").pack(side="left")
+        ParagonLabel(r2, text=f"New {field}", style="muted", width=140, anchor="w").pack(side="left")
         new_e = ParagonEntry(r2, height=38); new_e.pack(side="left", fill="x", expand=True)
         if new_guess:
             new_e.insert(0, new_guess)
 
         upd_tags = ctk.BooleanVar(value=True)
         upd_names = ctk.BooleanVar(value=True)
-        ParagonGradientCheckbox(inner, text="Update genre tags", variable=upd_tags).pack(anchor="w", padx=16, pady=(12, 2))
-        ParagonGradientCheckbox(inner, text="Rename files (replace genre in filename)",
+        ParagonGradientCheckbox(inner, text=f"Update {field} tags", variable=upd_tags).pack(anchor="w", padx=16, pady=(12, 2))
+        ParagonGradientCheckbox(inner, text=f"Rename files (replace {field} in filename)",
                                 variable=upd_names).pack(anchor="w", padx=16, pady=(0, 6))
 
         def _apply():
             old = old_e.get().strip()
             new = new_e.get().strip()
             if not new:
-                messagebox.showwarning("New genre required", "Enter the new genre.", parent=dlg)
+                messagebox.showwarning(f"New {field} required", f"Enter the new {field}.", parent=dlg)
                 return
             tagged = renamed = errs = 0
             for f in files:
                 cur = f
+                d = os.path.dirname(f)
+                name0, ext = os.path.splitext(os.path.basename(f))
+                parts0 = name0.split(" - ")
+                fn_val = parts0[seg].strip() if len(parts0) >= need else ""
+                # A track is targeted only if it currently holds the old value
+                # (so per-track fields like title aren't all overwritten). With no
+                # old value given, treat every track as targeted (set-all).
+                if old:
+                    try:
+                        tag_val = (TagManager.read_tags(f).get(field) or "").strip()
+                    except Exception:
+                        tag_val = ""
+                    targeted = (fn_val == old) or (old in name0) or (tag_val == old)
+                else:
+                    targeted = True
+                if not targeted:
+                    continue
                 try:
                     if upd_names.get() and old:
-                        d = os.path.dirname(cur)
-                        name, ext = os.path.splitext(os.path.basename(cur))
-                        parts = name.split(" - ")
                         newname = None
-                        if len(parts) >= 4 and parts[-4].strip() == old:
-                            parts[-4] = new
-                            newname = " - ".join(parts) + ext
-                        elif old in name:
-                            newname = name.replace(old, new) + ext
+                        if len(parts0) >= need and parts0[seg].strip() == old:
+                            parts0[seg] = new
+                            newname = " - ".join(parts0) + ext
+                        elif old in name0:
+                            newname = name0.replace(old, new) + ext
                         if newname:
                             newpath = os.path.join(d, newname)
                             if newpath != cur and not os.path.exists(newpath):
@@ -13447,11 +13482,11 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                                 cur = newpath
                                 renamed += 1
                     if upd_tags.get():
-                        if TagManager.write_tags(cur, {'genre': new}):
+                        if TagManager.write_tags(cur, {field: new}):
                             tagged += 1
                 except Exception as e:
                     errs += 1
-                    print(f"Set-genre error on {f}: {e}")
+                    print(f"Set-{field} error on {f}: {e}")
             dlg.destroy()
             msg = f"Updated {tagged} tag(s), renamed {renamed} file(s)."
             if errs:
