@@ -8773,27 +8773,27 @@ class MovieEditorDialog(ctk.CTkToplevel):
             load_local_image(
                 self.existing_artwork['fanart'],
                 self.fanart_label,
-                (260, 110),
+                (220, 84),
                 '_fanart_photo',
                 'fanart'
             )
-        
+
         # Load logo
         if self.existing_artwork.get('logo'):
             load_local_image(
                 self.existing_artwork['logo'],
                 self.logo_label,
-                (260, 60),
+                (220, 50),
                 '_logo_photo',
                 'logo'
             )
-        
+
         # Load landscape
         if self.existing_artwork.get('landscape'):
             load_local_image(
                 self.existing_artwork['landscape'],
                 self.landscape_label,
-                (260, 90),
+                (220, 84),
                 '_landscape_photo',
                 'landscape'
             )
@@ -9377,7 +9377,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
             if data and HAS_PIL:
                 try:
                     img = Image.open(io.BytesIO(data))
-                    img.thumbnail((260, 110), Image.Resampling.LANCZOS)
+                    img.thumbnail((220, 84), Image.Resampling.LANCZOS)
                     photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
                     self._fanart_photo = photo
                     self.after(0, lambda: self.fanart_label.configure(image=photo, text=""))
@@ -9395,7 +9395,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
             if data and HAS_PIL:
                 try:
                     img = Image.open(io.BytesIO(data))
-                    img.thumbnail((260, 60), Image.Resampling.LANCZOS)
+                    img.thumbnail((220, 50), Image.Resampling.LANCZOS)
                     photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
                     self._logo_photo = photo
                     self.after(0, lambda: self.logo_label.configure(image=photo, text=""))
@@ -9413,7 +9413,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
             if data and HAS_PIL:
                 try:
                     img = Image.open(io.BytesIO(data))
-                    img.thumbnail((260, 90), Image.Resampling.LANCZOS)
+                    img.thumbnail((220, 84), Image.Resampling.LANCZOS)
                     photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
                     self._landscape_photo = photo
                     self.after(0, lambda: self.landscape_label.configure(image=photo, text=""))
