@@ -12359,7 +12359,8 @@ class MovieLibraryDialog(ctk.CTkToplevel):
         def load():
             try:
                 img = Image.open(poster_path)
-                img.thumbnail((300, 450), Image.Resampling.LANCZOS)
+                # Slightly smaller than the 300x450 frame so the gold border shows
+                img.thumbnail((288, 438), Image.Resampling.LANCZOS)
                 # Schedule UI update on main thread
                 self.after(0, lambda: self._update_poster(img, poster_frame))
             except Exception as e:
