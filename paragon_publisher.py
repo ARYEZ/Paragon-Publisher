@@ -4161,7 +4161,7 @@ class _GradInput(tk.Canvas):
         # (it used to be grey) so it reads as a clean white frame nested inside
         # the gradient border.
         kwargs['border_color'] = "#ffffff"
-        kwargs.setdefault('border_width', 2)
+        kwargs['border_width'] = 1
         kwargs.setdefault('fg_color', ParagonTheme.BG_DARK)
         kwargs.setdefault('bg_color', ParagonTheme.BG_DARK)
         kwargs['corner_radius'] = max(0, radius - bw)
