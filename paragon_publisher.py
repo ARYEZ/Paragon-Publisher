@@ -4094,7 +4094,7 @@ class GradientBorder(tk.Canvas):
     the gradient shows only as a border frame around it. The child is embedded
     via a canvas window (not place) because CTk widgets reject width/height in
     place()."""
-    def __init__(self, master, bw=2, radius=6, height=36, width=200, **kw):
+    def __init__(self, master, bw=1, radius=6, height=36, width=200, **kw):
         super().__init__(master, highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK,
                          height=height, width=width, **kw)
         self._bw = bw
@@ -4137,7 +4137,7 @@ class GradientBorder(tk.Canvas):
 
 
 def make_grad_entry(parent, *, width=None, height=36, textvariable=None,
-                    placeholder_text="", font=None, bw=2):
+                    placeholder_text="", font=None, bw=1):
     """Create a CTkEntry wrapped in a Paragon gradient border. Returns the
     GradientBorder box (pack/grid it) and the inner entry."""
     box_w = (int(width) + 2 * bw) if width else 200
@@ -14051,7 +14051,7 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         # Gradient-bordered box around the filename so it matches the fields
-        file_box = GradientBorder(file_frame, bw=2, height=36)
+        file_box = GradientBorder(file_frame, bw=1, height=36)
         file_box.pack(side="left", fill="x", expand=True)
         inner_file = ctk.CTkFrame(file_box, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
         file_box.attach(inner_file)
@@ -14112,7 +14112,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
-        plot_box = GradientBorder(plot_frame, bw=2, height=100)
+        plot_box = GradientBorder(plot_frame, bw=1, height=100)
         plot_box.pack(side="left", fill="x", expand=True)
         self.ep_plot_text = ctk.CTkTextbox(plot_box, fg_color=ParagonTheme.BG_DARK,
                                            border_width=0, corner_radius=4,
