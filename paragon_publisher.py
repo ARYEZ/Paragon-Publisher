@@ -2556,7 +2556,10 @@ class PlotSummarizer:
         return (f'You are writing a plot synopsis for an episode of the audio/radio drama '
                 f'"{series}", titled "{title}". Based on the transcript below, write a concise '
                 f'2 to 4 sentence episode synopsis in the neutral style of a TV guide — describe '
-                f'what happens, do not mention that this is a transcript, do not add commentary '
+                f'the premise and setup only. Do NOT reveal spoilers: do not give away the '
+                f'ending, the resolution, the killer/culprit, any major twist, or how the '
+                f'conflict is resolved — set up the situation and stop, the way a TV guide '
+                f'teaser does. Do not mention that this is a transcript, do not add commentary '
                 f'or headings. Transcript:\n\n{t}')
 
     @staticmethod
