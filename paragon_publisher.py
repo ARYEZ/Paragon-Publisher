@@ -3589,7 +3589,7 @@ class ParagonButton(tk.Canvas):
                 if self._hover or self._selected:
                     c1, c2 = "#d81d45", ParagonTheme.GOLD
                 else:
-                    c1, c2 = _lighten("#d81d45", 0.62), _lighten(ParagonTheme.GOLD, 0.62)
+                    c1, c2 = _lighten("#d81d45", 0.30), _lighten(ParagonTheme.GOLD, 0.30)
                 bg = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
                                          radius=self._corner, gloss=True, border_hex="#ff8a3d")
                 if bg is not None:
@@ -3862,7 +3862,7 @@ class ParagonOptionMenu(tk.Canvas):
             if self._hover and self._state != "disabled":
                 c1, c2 = "#d81d45", ParagonTheme.GOLD
             else:
-                c1, c2 = _lighten("#d81d45", 0.62), _lighten(ParagonTheme.GOLD, 0.62)
+                c1, c2 = _lighten("#d81d45", 0.30), _lighten(ParagonTheme.GOLD, 0.30)
             bg = make_gradient_photo(w, h, left_hex=c1, right_hex=c2,
                                      radius=self._corner, gloss=True, border_hex="#ff8a3d")
             if bg is not None:
@@ -9137,7 +9137,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
 
             btn = ParagonButton(
                 row_frame, text=genre, height=34, width=self._chip_width(genre),
-                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=17,
+                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
                 command=lambda g=genre: self._toggle_genre(g)
             )
             btn.pack(side="left", padx=4, pady=4)
@@ -9155,7 +9155,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
         self.custom_genre_entry.bind("<Return>", lambda e: self._add_custom_genre())
 
         ParagonButton(
-            add_row, text="+ ADD", height=36, width=90, corner_radius=17,
+            add_row, text="+ ADD", height=36, width=90, corner_radius=8,
             fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_genre
         ).pack(side="left", padx=4)
 
@@ -9175,7 +9175,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
                 btn = ParagonButton(
                     row_frame, text=f"{studio}  ✕", height=34,
                     width=self._chip_width(studio) + 20,
-                    fg_color=ParagonTheme.RED_PRIMARY, corner_radius=17,
+                    fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
                     command=lambda s=studio: self._remove_studio(s)
                 )
                 btn.pack(side="left", padx=4, pady=4)
@@ -9194,7 +9194,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
         self.custom_studio_entry.pack(side="left", padx=4)
         self.custom_studio_entry.bind("<Return>", lambda e: self._add_custom_studio())
         ParagonButton(
-            add_row, text="+ ADD", height=36, width=90, corner_radius=17,
+            add_row, text="+ ADD", height=36, width=90, corner_radius=8,
             fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_studio
         ).pack(side="left", padx=4)
 
@@ -14100,18 +14100,20 @@ class TVEditorDialog(ctk.CTkToplevel):
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Genres", style="header").pack(anchor="w", pady=(0, 8))
-        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
-        self.genres_frame.pack(fill="x", pady=(0, 20))
+        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.genres_frame.pack(fill="x", pady=(0, 18))
         self._create_genre_chips()
-        
+
         ParagonLabel(scroll, text="Network/Studio", style="header").pack(anchor="w", pady=(0, 8))
-        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6, height=80)
+        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8, height=80,
+                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.studios_frame.pack(fill="x", pady=(0, 15))
-        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio", 
+        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio",
                                           text_color=ParagonTheme.TEXT_SECONDARY,
                                           font=ctk.CTkFont(size=self.FONT_NORMAL))
         self.studios_label.pack(padx=15, pady=15, anchor="w")
-    
+
     def _create_genre_chips(self):
         for widget in self.genres_frame.winfo_children():
             widget.destroy()
@@ -14126,44 +14128,33 @@ class TVEditorDialog(ctk.CTkToplevel):
         for i, genre in enumerate(all_genres):
             if i % 5 == 0:
                 row_frame = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
-                row_frame.pack(fill="x", padx=8, pady=4)
-            
-            is_selected = genre in self.selected_genres
-            btn = ctk.CTkButton(
-                row_frame, text=genre, height=36,
-                fg_color=ParagonTheme.RED_PRIMARY if is_selected else ParagonTheme.BG_TERTIARY,
-                hover_color=ParagonTheme.RED_LIGHT if is_selected else ParagonTheme.BG_HOVER,
-                text_color=ParagonTheme.TEXT_PRIMARY,
-                corner_radius=18,
-                font=ctk.CTkFont(size=self.FONT_SMALL),
+                row_frame.pack(fill="x", padx=10, pady=4)
+
+            btn = ParagonButton(
+                row_frame, text=genre, height=34,
+                width=max(84, int(len(str(genre)) * 11) + 26),
+                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
                 command=lambda g=genre: self._toggle_genre(g)
             )
-            btn.pack(side="left", padx=3, pady=3)
-        
+            btn.pack(side="left", padx=4, pady=4)
+            btn.set_selected(genre in self.selected_genres)
+
         # Add custom genre entry row
         add_row = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
-        add_row.pack(fill="x", padx=8, pady=8)
-        
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+
         self.custom_genre_entry = ctk.CTkEntry(
-            add_row, width=200, height=36,
-            placeholder_text="New genre...",
-            fg_color=ParagonTheme.BG_DARK,
-            border_color=ParagonTheme.BORDER_DARK,
+            add_row, width=220, height=36, placeholder_text="New genre...",
             font=ctk.CTkFont(size=self.FONT_SMALL)
         )
-        self.custom_genre_entry.pack(side="left", padx=3)
+        self.custom_genre_entry.pack(side="left", padx=4)
         self.custom_genre_entry.bind("<Return>", lambda e: self._add_custom_genre())
-        
-        ctk.CTkButton(
-            add_row, text="+ ADD", height=36, width=80,
-            fg_color=ParagonTheme.GOLD,
-            hover_color=ParagonTheme.GOLD_LIGHT,
-            text_color=ParagonTheme.BG_DARK,
-            corner_radius=18,
-            font=ctk.CTkFont(size=self.FONT_SMALL, weight="bold"),
-            command=self._add_custom_genre
-        ).pack(side="left", padx=3)
-    
+
+        ParagonButton(
+            add_row, text="+ ADD", height=36, width=90, corner_radius=8,
+            fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_genre
+        ).pack(side="left", padx=4)
+
     def _add_custom_genre(self):
         """Add a custom genre for TV shows"""
         genre = self.custom_genre_entry.get().strip()
@@ -15435,18 +15426,20 @@ if HAS_DND:
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Genres", style="header").pack(anchor="w", pady=(0, 8))
-        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
-        self.genres_frame.pack(fill="x", pady=(0, 20))
+        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.genres_frame.pack(fill="x", pady=(0, 18))
         self._create_genre_chips()
-        
+
         ParagonLabel(scroll, text="Network/Studio", style="header").pack(anchor="w", pady=(0, 8))
-        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6, height=80)
+        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8, height=80,
+                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.studios_frame.pack(fill="x", pady=(0, 15))
-        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio", 
+        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No network/studio",
                                           text_color=ParagonTheme.TEXT_SECONDARY,
                                           font=ctk.CTkFont(size=self.FONT_NORMAL))
         self.studios_label.pack(padx=15, pady=15, anchor="w")
-    
+
     def _create_genre_chips(self):
         for widget in self.genres_frame.winfo_children():
             widget.destroy()
@@ -15455,20 +15448,17 @@ if HAS_DND:
         for i, genre in enumerate(self.DEFAULT_GENRES):
             if i % 5 == 0:
                 row_frame = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
-                row_frame.pack(fill="x", padx=8, pady=4)
-            
-            is_selected = genre in self.selected_genres
-            btn = ctk.CTkButton(
-                row_frame, text=genre, height=36,
-                fg_color=ParagonTheme.RED_PRIMARY if is_selected else ParagonTheme.BG_TERTIARY,
-                hover_color=ParagonTheme.RED_LIGHT if is_selected else ParagonTheme.BG_HOVER,
-                text_color=ParagonTheme.TEXT_PRIMARY,
-                corner_radius=18,
-                font=ctk.CTkFont(size=self.FONT_SMALL),
+                row_frame.pack(fill="x", padx=10, pady=4)
+
+            btn = ParagonButton(
+                row_frame, text=genre, height=34,
+                width=max(84, int(len(str(genre)) * 11) + 26),
+                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=8,
                 command=lambda g=genre: self._toggle_genre(g)
             )
-            btn.pack(side="left", padx=3, pady=3)
-    
+            btn.pack(side="left", padx=4, pady=4)
+            btn.set_selected(genre in self.selected_genres)
+
     def _toggle_genre(self, genre):
         if genre in self.selected_genres:
             self.selected_genres.remove(genre)
