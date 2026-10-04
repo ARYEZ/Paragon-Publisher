@@ -5348,6 +5348,27 @@ class FilesPopoutWindow(ctk.CTkToplevel):
             pass
 
 
+def _save_cover_jpg(image_data: bytes, out_path: str) -> bool:
+    """Write embedded cover-art bytes to out_path as a JPEG. Re-encodes via
+    Pillow when available (so a PNG cover still lands as a valid folder.jpg),
+    otherwise writes the raw bytes. Returns True on success."""
+    if not image_data:
+        return False
+    try:
+        if HAS_PIL:
+            img = Image.open(io.BytesIO(image_data))
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.save(out_path, "JPEG", quality=92)
+        else:
+            with open(out_path, "wb") as f:
+                f.write(image_data)
+        return True
+    except Exception as e:
+        print(f"_save_cover_jpg failed: {e}")
+        return False
+
+
 # =============================================================================
 # TAG EDITOR PANEL - MP3TAG STYLE
 # =============================================================================
@@ -6179,7 +6200,15 @@ class TagEditorDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(family="Bebas Neue", size=16),
             command=self._extract_cover
         ).pack(side="left", padx=2)
-        
+
+        ctk.CTkButton(
+            btn_frame, text="→ Folder.jpg", width=110, height=32,
+            fg_color=ParagonTheme.BG_HOVER,
+            hover_color=ParagonTheme.RED_DARK,
+            font=ctk.CTkFont(family="Bebas Neue", size=16),
+            command=self._save_cover_as_folder
+        ).pack(side="left", padx=2)
+
         # File info
         self.info_label = ParagonLabel(parent, text="", style="muted")
         self.info_label.pack(pady=10)
@@ -6749,7 +6778,23 @@ class TagEditorDialog(ctk.CTkToplevel):
             with open(filepath, 'wb') as f:
                 f.write(self.cover_image_data)
             messagebox.showinfo("Saved", f"Cover saved to {filepath}")
-    
+
+    def _save_cover_as_folder(self):
+        """Save the current track's cover art into its folder as folder.jpg."""
+        if not self.cover_image_data:
+            messagebox.showinfo("No Cover", "No cover art to save.")
+            return
+        try:
+            folder = os.path.dirname(self.files[self.current_index])
+        except Exception:
+            messagebox.showinfo("No File", "No current file.")
+            return
+        out = os.path.join(folder, "folder.jpg")
+        if _save_cover_jpg(self.cover_image_data, out):
+            messagebox.showinfo("Saved", f"Cover saved as:\n{out}")
+        else:
+            messagebox.showerror("Error", "Failed to save folder.jpg (see console).")
+
     def _musicbrainz_lookup(self):
         """Open MusicBrainz lookup dialog"""
         # Get current values for search
@@ -13163,6 +13208,13 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ParagonButton(header, text="🎵 SET GENRE",
                      command=lambda: self._set_album_genre(album),
                      width=150, height=40).pack(side="right", anchor="n", padx=(0, 10))
+
+        # Save embedded cover art to the folder as folder.jpg
+        ParagonButton(header, text="🖼 SAVE COVER",
+                     command=lambda: self._save_album_cover(album),
+                     width=160, height=40,
+                     fg_color=ParagonTheme.BG_TERTIARY,
+                     hover_color=ParagonTheme.BG_HOVER).pack(side="right", anchor="n", padx=(0, 10))
         
         # Track list header
         track_header = ctk.CTkFrame(self.right_panel, fg_color="transparent")
@@ -13216,6 +13268,36 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         
         if files:
             dialog = TagEditorDialog(self.master, sorted(files))
+
+    def _save_album_cover(self, album: Dict):
+        """Extract embedded cover art from the album's tracks and save it to the
+        album folder as folder.jpg."""
+        audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
+        folder = album['path']
+        try:
+            files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                           if os.path.splitext(f)[1].lower() in audio_ext)
+        except Exception:
+            files = []
+        data = None
+        for f in files:
+            try:
+                data = TagManager.read_cover_art(f)
+            except Exception:
+                data = None
+            if data:
+                break
+        if not data:
+            messagebox.showinfo("No Cover", "No embedded cover art found in this album's tracks.")
+            return
+        out = os.path.join(folder, "folder.jpg")
+        if os.path.exists(out):
+            if not messagebox.askyesno("Overwrite?", "folder.jpg already exists. Overwrite it?"):
+                return
+        if _save_cover_jpg(data, out):
+            messagebox.showinfo("Saved", f"Cover saved as:\n{out}")
+        else:
+            messagebox.showerror("Error", "Failed to save folder.jpg (see console).")
 
     def _set_album_genre(self, album: Dict):
         """Propagate a single genre to every track in the album folder — both the
