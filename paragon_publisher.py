@@ -2512,8 +2512,9 @@ class AudioTranscriber:
         return np.frombuffer(proc.stdout, np.int16).astype(np.float32) / 32768.0
 
     @staticmethod
-    def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None):
-        """Return the transcript text. max_seconds > 0 stops early (to cap time)."""
+    def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None, beam_size=5):
+        """Return the transcript text. max_seconds > 0 stops early (to cap time);
+        beam_size trades speed for accuracy (1 = greedy, 5-10 = more accurate)."""
         model = AudioTranscriber._get_model(model_size)
         # Decode with ffmpeg ourselves (robust); only fall back to the file path
         # (PyAV) if ffmpeg/numpy aren't available.
@@ -2524,7 +2525,7 @@ class AudioTranscriber:
             capped = 0  # already trimmed by ffmpeg
         except Exception as e:
             print(f"ffmpeg decode unavailable ({e}); falling back to PyAV path")
-        segments, info = model.transcribe(audio_input, beam_size=1)
+        segments, info = model.transcribe(audio_input, beam_size=max(1, int(beam_size)))
         total = getattr(info, 'duration', 0) or 0
         if capped and total:
             total = min(total, capped)
@@ -13666,22 +13667,30 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                             border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         ctrl.pack(fill="x", padx=12, pady=(0, 6))
         row1 = ctk.CTkFrame(ctrl, fg_color="transparent"); row1.pack(fill="x", padx=10, pady=(8, 2))
-        ParagonLabel(row1, text="Source", style="muted", width=70, anchor="w").pack(side="left")
+        ParagonLabel(row1, text="Source", style="muted", width=62, anchor="w").pack(side="left")
         source_var = ctk.StringVar(value=pconfig_get("plot_source", "Online"))
         ParagonOptionMenu(row1, values=["Online", "Transcribe"], variable=source_var,
-                          width=140).pack(side="left", padx=(4, 16))
+                          width=130).pack(side="left", padx=(4, 14))
         ParagonLabel(row1, text="Whisper", style="muted", anchor="w").pack(side="left")
+        _WHISPER_MODELS = ["tiny", "tiny.en", "base", "base.en", "small", "small.en",
+                           "medium", "medium.en", "large-v3"]
         wmodel_var = ctk.StringVar(value=pconfig_get("plot_whisper_model", "base"))
-        ParagonOptionMenu(row1, values=["tiny", "base", "small", "medium"], variable=wmodel_var,
-                          width=110).pack(side="left", padx=(4, 16))
+        ParagonOptionMenu(row1, values=_WHISPER_MODELS, variable=wmodel_var,
+                          width=130).pack(side="left", padx=(4, 14))
+        ParagonLabel(row1, text="Accuracy", style="muted", anchor="w").pack(side="left")
+        acc_var = ctk.StringVar(value=pconfig_get("plot_accuracy", "Balanced"))
+        ParagonOptionMenu(row1, values=["Fast", "Balanced", "Best"], variable=acc_var,
+                          width=120).pack(side="left", padx=(4, 14))
         ParagonLabel(row1, text="Max min (0=all)", style="muted", anchor="w").pack(side="left")
-        maxmin_e = ParagonEntry(row1, width=60, height=36)
+        maxmin_e = ParagonEntry(row1, width=56, height=36)
         maxmin_e.insert(0, str(pconfig_get("plot_max_minutes", 0)))
-        maxmin_e.pack(side="left", padx=(4, 16))
-        ParagonLabel(row1, text="Summarizer", style="muted", anchor="w").pack(side="left")
+        maxmin_e.pack(side="left", padx=(4, 0))
+
+        row1b = ctk.CTkFrame(ctrl, fg_color="transparent"); row1b.pack(fill="x", padx=10, pady=(0, 2))
+        ParagonLabel(row1b, text="Summarizer", style="muted", width=78, anchor="w").pack(side="left")
         summ_var = ctk.StringVar(value=pconfig_get("plot_summarizer", "Ollama"))
-        ParagonOptionMenu(row1, values=["Ollama", "Cloud API", "Extractive"], variable=summ_var,
-                          width=130).pack(side="left", padx=(4, 0))
+        ParagonOptionMenu(row1b, values=["Ollama", "Cloud API", "Extractive"], variable=summ_var,
+                          width=150).pack(side="left", padx=(4, 0))
 
         row2 = ctk.CTkFrame(ctrl, fg_color="transparent"); row2.pack(fill="x", padx=10, pady=(2, 4))
         ParagonLabel(row2, text="Ollama", style="muted", width=70, anchor="w").pack(side="left")
@@ -13748,7 +13757,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             except Exception:
                 pass
 
-        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel):
+        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel, beam):
             found = 0
             n = len(episodes)
             for i, ep in enumerate(episodes, 1):
@@ -13775,7 +13784,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     err = ""
                     try:
                         transcript = AudioTranscriber.transcribe(ep['file'], wmodel,
-                                                                 max_seconds=maxsec, progress_cb=_tp)
+                                                                 max_seconds=maxsec, progress_cb=_tp,
+                                                                 beam_size=beam)
                     except Exception as e:
                         err = f"{type(e).__name__}: {e}"
                         print(f"transcribe error on {ep['file']}: {err}")
@@ -13813,7 +13823,9 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 maxsec = int(float(maxmin_e.get().strip() or 0) * 60)
             except Exception:
                 maxsec = 0
+            beam = {"Fast": 1, "Balanced": 5, "Best": 10}.get(acc_var.get(), 5)
             pconfig_set(plot_source=source, plot_whisper_model=wmodel_var.get(),
+                        plot_accuracy=acc_var.get(),
                         plot_summarizer=summ_var.get(), plot_max_minutes=maxmin_e.get().strip(),
                         plot_ollama_url=ollama_url_e.get().strip(),
                         plot_ollama_model=ollama_model_e.get().strip(),
@@ -13833,7 +13845,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 ollama_url_e.get().strip() or "http://localhost:11434",
                 ollama_model_e.get().strip() or "llama3.1",
                 cloud_base_e.get().strip() or "https://api.openai.com/v1",
-                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini"),
+                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini", beam),
                 daemon=True).start()
 
         def _write():
