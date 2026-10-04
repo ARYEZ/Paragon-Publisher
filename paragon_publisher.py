@@ -2560,7 +2560,47 @@ class PlotSummarizer:
                 f'ending, the resolution, the killer/culprit, any major twist, or how the '
                 f'conflict is resolved — set up the situation and stop, the way a TV guide '
                 f'teaser does. Do not mention that this is a transcript, do not add commentary '
-                f'or headings. Transcript:\n\n{t}')
+                f'or headings. Do NOT begin with meta lead-ins such as "In the latest episode of '
+                f'{series}," / "In this episode," / "This episode of {series}..." — start directly '
+                f'with the characters and the situation. Transcript:\n\n{t}')
+
+    @staticmethod
+    def _clean_summary(text, series=""):
+        """Strip meta lead-ins ('In the latest episode of X, ...') and stray
+        wrapping quotes the model sometimes adds, then re-capitalize."""
+        s = (text or "").strip()
+        if not s:
+            return s
+        # Drop surrounding quotes
+        if len(s) >= 2 and s[0] in '"“‘\'' and s[-1] in '"”’\'':
+            s = s[1:-1].strip()
+        lead_patterns = [
+            # "In/On (the) (latest) episode (of X / titled "X"),"
+            r'^(?:in|on)\s+(?:the\s+|this\s+|a\s+)?(?:latest\s+|newest\s+|current\s+|recent\s+)?'
+            r'(?:episode|installment|instalment|chapter|edition|entry|story)'
+            r'(?:\s+(?:of|titled|called|entitled)\s+[^,]+)?\s*[,:]\s+',
+            # "This/The (latest) episode (of X),"
+            r'^(?:this|the)\s+(?:latest\s+|newest\s+|current\s+)?'
+            r'(?:episode|installment|instalment|chapter)'
+            r'(?:\s+of\s+[^,]+)?\s*[,:]\s+',
+            # "This week('s episode / on X),"
+            r'^this\s+week(?:\'s\s+episode|\s+on\s+[^,]+)?\s*[,:]\s+',
+        ]
+        if series:
+            esc = re.escape(series.strip())
+            lead_patterns.append(
+                r'^(?:in|on)\s+(?:the\s+(?:series|show)\s+)?["“]?' + esc
+                + r'["”]?\s*[,:]\s+')
+        changed = True
+        while changed:
+            changed = False
+            for p in lead_patterns:
+                new = re.sub(p, '', s, count=1, flags=re.IGNORECASE)
+                if new != s:
+                    s, changed = new.strip(), True
+        if s and s[0].islower():
+            s = s[0].upper() + s[1:]
+        return s
 
     @staticmethod
     def ollama(transcript, series, title, url="http://localhost:11434", model="llama3.1"):
@@ -2571,7 +2611,7 @@ class PlotSummarizer:
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:
             data = json.loads(r.read().decode("utf-8", "replace"))
-        return (data.get("response") or "").strip()
+        return PlotSummarizer._clean_summary(data.get("response") or "", series)
 
     @staticmethod
     def openai(transcript, series, title, base_url, api_key, model="gpt-4o-mini"):
@@ -2585,7 +2625,8 @@ class PlotSummarizer:
                                               "Authorization": f"Bearer {api_key}"})
         with urllib.request.urlopen(req, timeout=180) as r:
             data = json.loads(r.read().decode("utf-8", "replace"))
-        return data["choices"][0]["message"]["content"].strip()
+        return PlotSummarizer._clean_summary(
+            data["choices"][0]["message"]["content"], series)
 
     @staticmethod
     def extractive(transcript, max_sentences=4):
