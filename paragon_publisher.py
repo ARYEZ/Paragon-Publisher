@@ -4124,12 +4124,15 @@ class GradientBorder(tk.Canvas):
             else:
                 self.create_rectangle(1, 1, w - 1, h - 1, outline=ParagonTheme.GOLD,
                                       tags="grad")
-            self.tag_lower("grad")  # keep the gradient behind the embedded child
             if self._win is not None:
                 bw = self._bw
                 self.coords(self._win, bw, bw)
                 self.itemconfigure(self._win, width=max(1, w - 2 * bw),
                                    height=max(1, h - 2 * bw))
+            # Draw the ring ABOVE the embedded child: the ring has a transparent
+            # interior, so it only paints the thin border band — including the
+            # rounded corners — over the child's square corners.
+            self.tag_raise("grad")
         except Exception:
             pass
 
@@ -4140,8 +4143,13 @@ def make_grad_entry(parent, *, width=None, height=36, textvariable=None,
     GradientBorder box (pack/grid it) and the inner entry."""
     box_w = (int(width) + 2 * bw) if width else 200
     box = GradientBorder(parent, bw=bw, height=height, width=box_w)
+    # Round the entry to match the ring's inner radius and force its corner fill
+    # black so the corners blend into the page (letting the rounded gradient
+    # show through) instead of squaring off the border.
+    inner_r = max(0, box._radius - bw)
     entry = ctk.CTkEntry(box, textvariable=textvariable, placeholder_text=placeholder_text,
-                         fg_color=ParagonTheme.BG_DARK, border_width=0, corner_radius=4,
+                         fg_color=ParagonTheme.BG_DARK, bg_color=ParagonTheme.BG_DARK,
+                         border_width=0, corner_radius=inner_r,
                          font=font or ctk.CTkFont(size=16))
     box.attach(entry)
     return box, entry
@@ -14090,7 +14098,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         # Gradient-bordered box around the filename so it matches the fields
         file_box = GradientBorder(file_frame, bw=1, height=36)
         file_box.pack(side="left", fill="x", expand=True)
-        inner_file = ctk.CTkFrame(file_box, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
+        inner_file = ctk.CTkFrame(file_box, fg_color=ParagonTheme.BG_DARK,
+                                  bg_color=ParagonTheme.BG_DARK,
+                                  corner_radius=max(0, file_box._radius - 1))
         file_box.attach(inner_file)
         self.ep_file_label = ctk.CTkLabel(inner_file, text="Select an episode", anchor="w",
                                           text_color=ParagonTheme.TEXT_PRIMARY,
@@ -14152,7 +14162,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         plot_box = GradientBorder(plot_frame, bw=1, height=100)
         plot_box.pack(side="left", fill="x", expand=True)
         self.ep_plot_text = ctk.CTkTextbox(plot_box, fg_color=ParagonTheme.BG_DARK,
-                                           border_width=0, corner_radius=4,
+                                           bg_color=ParagonTheme.BG_DARK,
+                                           border_width=0,
+                                           corner_radius=max(0, plot_box._radius - 1),
                                            font=ctk.CTkFont(size=self.FONT_NORMAL))
         plot_box.attach(self.ep_plot_text)
         
