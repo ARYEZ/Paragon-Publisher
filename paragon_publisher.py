@@ -9415,9 +9415,10 @@ class MovieEditorDialog(ctk.CTkToplevel):
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Video", style="header").pack(anchor="w", pady=(0, 8))
-        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                   border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         video_frame.pack(fill="x", pady=(0, 20))
-        
+
         self.video_info_labels = {}
         for field in ["Codec", "Resolution", "Aspect Ratio", "Scantype", "Duration"]:
             row = ctk.CTkFrame(video_frame, fg_color="transparent")
@@ -9429,19 +9430,21 @@ class MovieEditorDialog(ctk.CTkToplevel):
                               font=ctk.CTkFont(size=self.FONT_NORMAL))
             lbl.pack(side="left", fill="x", expand=True)
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
-        
+
         ParagonLabel(scroll, text="Audio", style="header").pack(anchor="w", pady=(15, 8))
-        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
-        
+
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
-        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
-    
+
     def _create_artwork_panel(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=5, pady=10)
@@ -14690,7 +14693,8 @@ class TVEditorDialog(ctk.CTkToplevel):
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Video", style="header").pack(anchor="w", pady=(0, 8))
-        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         video_frame.pack(fill="x", pady=(0, 20))
         
         self.video_info_labels = {}
@@ -14706,13 +14710,15 @@ class TVEditorDialog(ctk.CTkToplevel):
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
         
         ParagonLabel(scroll, text="Audio", style="header").pack(anchor="w", pady=(15, 8))
-        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
-        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
@@ -15689,7 +15695,8 @@ if HAS_DND:
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
         ParagonLabel(scroll, text="Video", style="header").pack(anchor="w", pady=(0, 8))
-        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        video_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         video_frame.pack(fill="x", pady=(0, 20))
         
         self.video_info_labels = {}
@@ -15705,13 +15712,15 @@ if HAS_DND:
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
         
         ParagonLabel(scroll, text="Audio", style="header").pack(anchor="w", pady=(15, 8))
-        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.audio_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
-        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
+        self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
+                                       border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
