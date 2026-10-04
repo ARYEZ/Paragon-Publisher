@@ -2341,6 +2341,108 @@ class FanartTVAPI:
         return result
 
 
+class RadioDramaPlotFinder:
+    """Fetch episode plots for audio/radio drama from free online sources
+    (Wikipedia + Internet Archive). No API key required. urllib-based to match
+    the rest of the app."""
+    UA = "ParagonHarvester/1.0 (radio-drama plot finder)"
+
+    @staticmethod
+    def _get_json(url, timeout=12):
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', RadioDramaPlotFinder.UA)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode('utf-8', 'replace'))
+        except Exception as e:
+            print(f"Plot finder fetch failed: {e}")
+            return None
+
+    @staticmethod
+    def _clean(text, limit=1400):
+        if not text:
+            return ""
+        text = re.sub(r'\[\d+\]', '', str(text))       # strip [1] refs
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) > limit:
+            cut = text[:limit]
+            dot = cut.rfind('. ')
+            text = (cut[:dot + 1] if dot > 200 else cut).strip()
+        return text
+
+    @staticmethod
+    def wikipedia(series, title, timeout=12):
+        """Return (plot, source) from Wikipedia, or ("","")."""
+        series = (series or "").strip()
+        title = (title or "").strip()
+        queries = []
+        if title:
+            queries.append(f'{series} "{title}"')
+            queries.append(f'{title} {series} radio')
+        queries.append(f'{series} radio drama')
+        seen_pages = set()
+        for q in queries:
+            url = ("https://en.wikipedia.org/w/api.php?action=query&list=search"
+                   f"&srsearch={urllib.parse.quote(q)}&srlimit=3&format=json")
+            data = RadioDramaPlotFinder._get_json(url, timeout)
+            if not data:
+                continue
+            for hit in data.get('query', {}).get('search', []):
+                pagetitle = hit.get('title')
+                if not pagetitle or pagetitle in seen_pages:
+                    continue
+                seen_pages.add(pagetitle)
+                ex = ("https://en.wikipedia.org/w/api.php?action=query&prop=extracts"
+                      "&exintro&explaintext&redirects=1&format=json"
+                      f"&titles={urllib.parse.quote(pagetitle)}")
+                ed = RadioDramaPlotFinder._get_json(ex, timeout)
+                if not ed:
+                    continue
+                for _, pg in ed.get('query', {}).get('pages', {}).items():
+                    extract = pg.get('extract', '')
+                    if extract and len(extract) > 60:
+                        return (RadioDramaPlotFinder._clean(extract),
+                                f"Wikipedia · {pagetitle}")
+        return ("", "")
+
+    @staticmethod
+    def archive_org(series, title, timeout=12):
+        """Return (plot, source) from the Internet Archive, or ("","")."""
+        q = f'{(series or "").strip()} {(title or "").strip()}'.strip()
+        if not q:
+            return ("", "")
+        url = ("https://archive.org/advancedsearch.php?q="
+               f"{urllib.parse.quote(q)}"
+               "&fl[]=identifier&fl[]=title&fl[]=description&rows=6&page=1&output=json")
+        data = RadioDramaPlotFinder._get_json(url, timeout)
+        if not data:
+            return ("", "")
+        tl = (title or "").lower()
+        best = None
+        for d in data.get('response', {}).get('docs', []):
+            desc = d.get('description')
+            if isinstance(desc, list):
+                desc = " ".join(desc)
+            if not desc or len(desc) < 40:
+                continue
+            dt = d.get('title') or ""
+            dt = " ".join(dt) if isinstance(dt, list) else dt
+            ident = d.get('identifier', '')
+            cleaned = RadioDramaPlotFinder._clean(desc)
+            if tl and tl in dt.lower():
+                return (cleaned, f"Archive.org · {ident}")
+            if best is None:
+                best = (cleaned, f"Archive.org · {ident}")
+        return best or ("", "")
+
+    @staticmethod
+    def find(series, title, timeout=12):
+        plot, src = RadioDramaPlotFinder.wikipedia(series, title, timeout)
+        if plot:
+            return plot, src
+        return RadioDramaPlotFinder.archive_org(series, title, timeout)
+
+
 class NFOGenerator:
     """Generate NFO files for Kodi/Plex/Jellyfin"""
     
@@ -13161,6 +13263,9 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ParagonButton(btnrow, text="🎼 SET TITLE",
                      command=lambda: self._set_album_title(album),
                      width=150, height=42).pack(side="left", padx=6)
+        ParagonButton(btnrow, text="📝 FIX PLOTS",
+                     command=lambda: self._fix_plots(album),
+                     width=150, height=42).pack(side="left", padx=6)
         ParagonButton(btnrow, text="🖼 SAVE COVER",
                      command=lambda: self._save_album_cover(album),
                      width=170, height=42,
@@ -13358,6 +13463,147 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 f"No embedded art: {nocover}"))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _fix_plots(self, album: Dict):
+        """Find a plot for each episode of an audio/radio drama (Wikipedia +
+        Internet Archive), let the user review, then write per-episode Kodi .nfo
+        files (<audiofile>.nfo with <episodedetails><plot>)."""
+        audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
+        folder = album['path']
+        try:
+            files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                           if os.path.splitext(f)[1].lower() in audio_ext)
+        except Exception:
+            files = []
+        if not files:
+            messagebox.showinfo("No tracks", "No audio files found in this album folder.")
+            return
+        series = (self.selected_artist or {}).get('name') or album.get('name') or ""
+
+        # Build the episode list (title from tag, else the filename title segment)
+        episodes = []
+        for idx, f in enumerate(files, 1):
+            try:
+                tags = TagManager.read_tags(f)
+            except Exception:
+                tags = {}
+            title = (tags.get('title') or "").strip()
+            if not title:
+                base = os.path.splitext(os.path.basename(f))[0]
+                parts = base.split(" - ")
+                title = parts[-6].strip() if len(parts) >= 6 else base
+            track = str(tags.get('track') or "").strip()
+            try:
+                epnum = int(re.split(r'[^\d]', track)[0]) if track and track[0].isdigit() else idx
+            except Exception:
+                epnum = idx
+            episodes.append({'file': f, 'title': title, 'episode': epnum,
+                             'plot': '', 'source': '', 'box': None, 'src_lbl': None,
+                             'inc': None})
+
+        # ---- Review dialog ----
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Fix Plots")
+        dlg.geometry("940x720")
+        dlg.transient(self)
+        outer = ctk.CTkFrame(dlg, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+        outer.pack(fill="both", expand=True, padx=4, pady=4)
+        inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+        ParagonLabel(inner, text="FIX PLOTS", style="header").pack(anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text=f"{series} · {len(episodes)} episodes · Wikipedia + Internet Archive",
+                     style="muted").pack(anchor="w", padx=16, pady=(0, 8))
+        prog = ParagonLabel(inner, text="Searching…", style="muted")
+        prog.pack(anchor="w", padx=16, pady=(0, 6))
+
+        scroll = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY)
+        scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+
+        for ep in episodes:
+            card = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+            card.pack(fill="x", padx=6, pady=6)
+            top = ctk.CTkFrame(card, fg_color="transparent")
+            top.pack(fill="x", padx=10, pady=(8, 2))
+            ep['inc'] = ctk.BooleanVar(value=False)
+            ParagonGradientCheckbox(top, text=f"E{ep['episode']:02d} · {ep['title']}",
+                                    variable=ep['inc']).pack(side="left")
+            ep['src_lbl'] = ParagonLabel(top, text="…", style="muted", anchor="e")
+            ep['src_lbl'].pack(side="right")
+            ep['box'] = ctk.CTkTextbox(card, height=90, fg_color=ParagonTheme.BG_TERTIARY,
+                                       border_width=0)
+            ep['box'].pack(fill="x", padx=10, pady=(2, 10))
+
+        def _fetch():
+            found = 0
+            for i, ep in enumerate(episodes, 1):
+                self.after(0, lambda i=i: prog.configure(text=f"Searching… {i}/{len(episodes)}"))
+                plot, src = "", ""
+                try:
+                    plot, src = RadioDramaPlotFinder.find(series, ep['title'])
+                except Exception as e:
+                    print(f"plot find error: {e}")
+                if plot:
+                    found += 1
+
+                def _apply_row(ep=ep, plot=plot, src=src):
+                    try:
+                        ep['box'].delete("1.0", "end")
+                        ep['box'].insert("1.0", plot or "")
+                        ep['src_lbl'].configure(text=src or "not found")
+                        if plot:
+                            ep['inc'].set(True)
+                    except Exception:
+                        pass
+                self.after(0, _apply_row)
+            self.after(0, lambda: prog.configure(
+                text=f"Found {found}/{len(episodes)}. Review, then Write NFOs."))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+        def _write():
+            written = skipped = 0
+            for ep in episodes:
+                try:
+                    if not ep['inc'].get():
+                        skipped += 1
+                        continue
+                    plot = ep['box'].get("1.0", "end").strip()
+                    if not plot:
+                        skipped += 1
+                        continue
+                    self._write_episode_nfo(ep['file'], series, 1, ep['episode'],
+                                            ep['title'], plot)
+                    written += 1
+                except Exception as e:
+                    print(f"NFO write error: {e}")
+            dlg.destroy()
+            messagebox.showinfo("Done", f"Wrote {written} .nfo file(s), skipped {skipped}.")
+
+        btns = ctk.CTkFrame(inner, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
+        ParagonSecondaryButton(btns, text="CANCEL", command=dlg.destroy, width=100).pack(side="left")
+        ParagonButton(btns, text="💾 WRITE NFOS", command=_write, width=170).pack(side="right")
+        dlg.after(80, lambda: (dlg.lift(), dlg.grab_set()))
+
+    def _write_episode_nfo(self, audio_path, series, season, episode, title, plot):
+        """Write a Kodi-style <episodedetails> NFO next to the audio file."""
+        import xml.sax.saxutils as _sx
+        esc = lambda s: _sx.escape(str(s if s is not None else ""))
+        nfo_path = os.path.splitext(audio_path)[0] + ".nfo"
+        content = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<episodedetails>\n'
+            f'  <title>{esc(title)}</title>\n'
+            f'  <showtitle>{esc(series)}</showtitle>\n'
+            f'  <season>{int(season)}</season>\n'
+            f'  <episode>{int(episode)}</episode>\n'
+            f'  <plot>{esc(plot)}</plot>\n'
+            '</episodedetails>\n'
+        )
+        with open(nfo_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return nfo_path
 
     # Filename convention: "<artist> - <title> - <album> - <genre> - <year> - <format> - <bitrate>"
     # so the fields sit at these " - " positions counted from the end.
