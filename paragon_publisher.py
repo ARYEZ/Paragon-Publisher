@@ -13675,6 +13675,24 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         dlg.title("Fix Plots")
         dlg.geometry("980x780")
         dlg.transient(self)
+
+        def _maximize():
+            # Open maximized/full-size; try the cross-platform options in order.
+            try:
+                dlg.state("zoomed")          # Windows / macOS
+                return
+            except Exception:
+                pass
+            try:
+                dlg.attributes("-zoomed", True)  # some X11 window managers
+                return
+            except Exception:
+                pass
+            try:                              # fallback: fill the screen
+                dlg.geometry(f"{dlg.winfo_screenwidth()}x{dlg.winfo_screenheight()}+0+0")
+            except Exception:
+                pass
+        dlg.after(10, _maximize)
         outer = ctk.CTkFrame(dlg, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
         outer.pack(fill="both", expand=True, padx=4, pady=4)
         inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
@@ -13689,22 +13707,22 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ctrl.pack(fill="x", padx=12, pady=(0, 6))
         row1 = ctk.CTkFrame(ctrl, fg_color="transparent"); row1.pack(fill="x", padx=10, pady=(8, 2))
         ParagonLabel(row1, text="Source", style="muted", width=62, anchor="w").pack(side="left")
-        source_var = ctk.StringVar(value=pconfig_get("plot_source", "Online"))
+        source_var = ctk.StringVar(value=pconfig_get("plot_source", "Transcribe"))
         ParagonOptionMenu(row1, values=["Online", "Transcribe"], variable=source_var,
                           width=130).pack(side="left", padx=(4, 14))
         ParagonLabel(row1, text="Whisper", style="muted", anchor="w").pack(side="left")
         _WHISPER_MODELS = ["tiny", "tiny.en", "base", "base.en", "small", "small.en",
                            "medium", "medium.en", "large-v3"]
-        wmodel_var = ctk.StringVar(value=pconfig_get("plot_whisper_model", "base"))
+        wmodel_var = ctk.StringVar(value=pconfig_get("plot_whisper_model", "small.en"))
         ParagonOptionMenu(row1, values=_WHISPER_MODELS, variable=wmodel_var,
                           width=130).pack(side="left", padx=(4, 14))
         ParagonLabel(row1, text="Accuracy", style="muted", anchor="w").pack(side="left")
-        acc_var = ctk.StringVar(value=pconfig_get("plot_accuracy", "Balanced"))
+        acc_var = ctk.StringVar(value=pconfig_get("plot_accuracy", "Fast"))
         ParagonOptionMenu(row1, values=["Fast", "Balanced", "Best"], variable=acc_var,
                           width=120).pack(side="left", padx=(4, 14))
         ParagonLabel(row1, text="Max min (0=all)", style="muted", anchor="w").pack(side="left")
         maxmin_e = ParagonEntry(row1, width=56, height=36)
-        maxmin_e.insert(0, str(pconfig_get("plot_max_minutes", 0)))
+        maxmin_e.insert(0, str(pconfig_get("plot_max_minutes", 12)))
         maxmin_e.pack(side="left", padx=(4, 0))
 
         row1b = ctk.CTkFrame(ctrl, fg_color="transparent"); row1b.pack(fill="x", padx=10, pady=(0, 2))
