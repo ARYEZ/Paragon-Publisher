@@ -3788,10 +3788,10 @@ class ParagonGradientCheckbox(tk.Canvas):
         self._box = box
         try:
             from tkinter import font as _tkfont
-            self._font = _tkfont.Font(family="Segoe UI", size=15)
+            self._font = _tkfont.Font(family="Bebas Neue", size=17)
             tw = self._font.measure(text)
         except Exception:
-            self._font = ("Segoe UI", 15)
+            self._font = ("Bebas Neue", 17)
             tw = len(text) * 9
         w = box + 12 + tw + 16
         h = 36
@@ -4269,6 +4269,15 @@ class _GradInput(tk.Canvas):
         kwargs.setdefault('bg_color', ParagonTheme.BG_DARK)
         # Force the typed text pure white (CTk's own default is greyish).
         kwargs.setdefault('text_color', "#ffffff")
+        # Keep typed VALUES in a readable font (Segoe UI), even if a Bebas Neue
+        # label font was passed in — Bebas is an all-caps display face and makes
+        # paths/URLs/titles hard to read. Preserve the requested size.
+        try:
+            _pf = kwargs.get('font')
+            _sz = int(_pf.cget('size')) if _pf is not None else 16
+        except Exception:
+            _sz = 16
+        kwargs['font'] = ctk.CTkFont(family="Segoe UI", size=_sz)
         kwargs['corner_radius'] = max(0, radius - bw)
         self._inner = self._INNER(self, **kwargs)
         self._win = self.create_window(bw, bw, window=self._inner, anchor='nw')
@@ -8940,7 +8949,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
                         self.audio_frame,
                         text=track_text,
                         text_color=ParagonTheme.TEXT_PRIMARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)
                     ).pack(padx=15, pady=5, anchor="w")
             
             # Update subtitles
@@ -8955,7 +8964,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
                         self.subs_frame,
                         text=f"Subtitle {i+1}: {lang}",
                         text_color=ParagonTheme.TEXT_PRIMARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)
                     ).pack(padx=15, pady=5, anchor="w")
         
         # Fallback: use ffprobe stream_info if available
@@ -9249,13 +9258,13 @@ class MovieEditorDialog(ctk.CTkToplevel):
         
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Movie title...",
                                          fg_color="transparent", border_width=0, width=350,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.search_entry.pack(side="left", padx=(15, 5), pady=10)
         self.search_entry.bind('<Return>', lambda e: self._search())
         
         self.year_entry = ctk.CTkEntry(search_frame, placeholder_text="Year",
                                        fg_color="transparent", border_width=0, width=100,
-                                       font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.year_entry.pack(side="left", padx=5, pady=10)
         
         ParagonButton(search_frame, text="SEARCH", command=self._search, width=120, height=45).pack(side="left", padx=(5, 15), pady=10)
@@ -9283,18 +9292,18 @@ class MovieEditorDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(id_frame, text="IMDB ID", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['imdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['imdb_id'], width=150,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         
         ctk.CTkLabel(id_frame, text="TMDB ID", width=100, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['tmdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['tmdb_id'], width=120,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left")
         
         self._add_field(scroll, "Name", "title")
@@ -9305,10 +9314,10 @@ class MovieEditorDialog(ctk.CTkToplevel):
         set_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(set_frame, text="Set", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['set'] = ctk.StringVar()
         ctk.CTkEntry(set_frame, textvariable=self.field_vars['set'],
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", fill="x", expand=True)
         
         self._add_field(scroll, "Tagline", "tagline")
@@ -9317,32 +9326,32 @@ class MovieEditorDialog(ctk.CTkToplevel):
         rating_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(rating_frame, text="Ratings", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         rating_info = ctk.CTkFrame(rating_frame, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
         rating_info.pack(side="left", fill="x", expand=True)
         self.rating_label = ctk.CTkLabel(rating_info, text="TMDB: -- | Votes: --",
                                          text_color=ParagonTheme.TEXT_PRIMARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.rating_label.pack(padx=10, pady=8, anchor="w")
         
         release_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         release_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(release_frame, text="Released", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['release_date'] = ctk.StringVar()
         ctk.CTkEntry(release_frame, textvariable=self.field_vars['release_date'], width=130,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         ctk.CTkLabel(release_frame, text="Runtime", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['runtime'] = ctk.StringVar()
         ctk.CTkEntry(release_frame, textvariable=self.field_vars['runtime'], width=100,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left")
         ctk.CTkLabel(release_frame, text="Minutes", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=5)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=5)
         
         self._add_field(scroll, "Director", "director")
         self._add_field(scroll, "Writer", "writer")
@@ -9351,11 +9360,11 @@ class MovieEditorDialog(ctk.CTkToplevel):
         cert_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(cert_frame, text="Certification", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
         ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         font=ctk.CTkFont(size=self.FONT_NORMAL),
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                          width=200, height=36).pack(side="left")
 
         self._add_field(scroll, "Trailer", "trailer")
@@ -9364,9 +9373,9 @@ class MovieEditorDialog(ctk.CTkToplevel):
         plot_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
         self.plot_text = ctk.CTkTextbox(plot_frame, height=120, fg_color=ParagonTheme.BG_DARK,
-                                        font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.plot_text.pack(side="left", fill="x", expand=True)
     
     def _add_field(self, parent, label, key, readonly=False):
@@ -9374,11 +9383,11 @@ class MovieEditorDialog(ctk.CTkToplevel):
         frame.pack(fill="x", pady=4)
         ctk.CTkLabel(frame, text=label, width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars[key] = ctk.StringVar()
         entry = ctk.CTkEntry(frame, textvariable=self.field_vars[key],
                             fg_color=ParagonTheme.BG_DARK,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL),
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                             height=36,
                             state="disabled" if readonly else "normal")
         entry.pack(side="left", fill="x", expand=True)
@@ -9427,7 +9436,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
 
         self.custom_genre_entry = ctk.CTkEntry(
             add_row, width=220, height=36, placeholder_text="New genre...",
-            font=ctk.CTkFont(size=self.FONT_SMALL)
+            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)
         )
         self.custom_genre_entry.pack(side="left", padx=4)
         self.custom_genre_entry.bind("<Return>", lambda e: self._add_custom_genre())
@@ -9461,13 +9470,13 @@ class MovieEditorDialog(ctk.CTkToplevel):
         else:
             ctk.CTkLabel(self.studios_frame, text="No studios yet — add one below",
                          text_color=ParagonTheme.TEXT_SECONDARY,
-                         font=ctk.CTkFont(size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
 
         add_row = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
         add_row.pack(fill="x", padx=10, pady=(6, 10))
         self.custom_studio_entry = ctk.CTkEntry(
             add_row, width=240, height=36, placeholder_text="New studio...",
-            font=ctk.CTkFont(size=self.FONT_SMALL)
+            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)
         )
         self.custom_studio_entry.pack(side="left", padx=4)
         self.custom_studio_entry.bind("<Return>", lambda e: self._add_custom_studio())
@@ -9531,9 +9540,9 @@ class MovieEditorDialog(ctk.CTkToplevel):
             row.pack(fill="x", padx=15, pady=6)
             ctk.CTkLabel(row, text=field, width=140, anchor="w",
                         text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
             lbl = ctk.CTkLabel(row, text="--", anchor="w", text_color=ParagonTheme.TEXT_PRIMARY,
-                              font=ctk.CTkFont(size=self.FONT_NORMAL))
+                              font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
             lbl.pack(side="left", fill="x", expand=True)
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
 
@@ -9542,14 +9551,14 @@ class MovieEditorDialog(ctk.CTkToplevel):
                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
 
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
         self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
 
     def _create_artwork_panel(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
@@ -9557,56 +9566,56 @@ class MovieEditorDialog(ctk.CTkToplevel):
         
         # Poster - clickable
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4,
                                          cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.poster_frame.pack_propagate(False)
         self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.poster_label.pack(expand=True)
         self.poster_frame.bind("<Button-1>", lambda e: self._open_image_chooser("posters"))
         self.poster_label.bind("<Button-1>", lambda e: self._open_image_chooser("posters"))
         
         # Logo - clickable
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4,
                                        cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.logo_frame.pack_propagate(False)
         self.logo_label = ctk.CTkLabel(self.logo_frame, text="No Logo\n(Click to choose)", 
                                        text_color=ParagonTheme.TEXT_SECONDARY,
-                                       font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.logo_label.pack(expand=True)
         self.logo_frame.bind("<Button-1>", lambda e: self._open_image_chooser("logos"))
         self.logo_label.bind("<Button-1>", lambda e: self._open_image_chooser("logos"))
         
         # Fanart - clickable
         ctk.CTkLabel(scroll, text="Fanart (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
                                          cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.fanart_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.fanart_frame.pack_propagate(False)
         self.fanart_label = ctk.CTkLabel(self.fanart_frame, text="No Fanart\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.fanart_label.pack(expand=True)
         self.fanart_frame.bind("<Button-1>", lambda e: self._open_image_chooser("backdrops"))
         self.fanart_label.bind("<Button-1>", lambda e: self._open_image_chooser("backdrops"))
         
         # Landscape - clickable (uses backdrops but saves as landscape.jpg)
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
                                             cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.landscape_frame.pack_propagate(False)
         self.landscape_label = ctk.CTkLabel(self.landscape_frame, text="No Landscape\n(Click to choose)", 
                                             text_color=ParagonTheme.TEXT_SECONDARY,
-                                            font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.landscape_label.pack(expand=True)
         self.landscape_frame.bind("<Button-1>", lambda e: self._open_image_chooser("landscape"))
         self.landscape_label.bind("<Button-1>", lambda e: self._open_image_chooser("landscape"))
@@ -9617,19 +9626,19 @@ class MovieEditorDialog(ctk.CTkToplevel):
         
         self.dl_poster = ctk.BooleanVar(value=True)
         ParagonGradientCheckbox(opts, text="Poster", variable=self.dl_poster, fg_color=ParagonTheme.RED_PRIMARY,
-                       font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
+                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_fanart = ctk.BooleanVar(value=True)
         ParagonGradientCheckbox(opts, text="Fanart", variable=self.dl_fanart, fg_color=ParagonTheme.RED_PRIMARY,
-                       font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
+                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_logo = ctk.BooleanVar(value=True)
         ParagonGradientCheckbox(opts, text="Logo", variable=self.dl_logo, fg_color=ParagonTheme.RED_PRIMARY,
-                       font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
+                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.dl_landscape = ctk.BooleanVar(value=True)
         ParagonGradientCheckbox(opts, text="Landscape", variable=self.dl_landscape, fg_color=ParagonTheme.RED_PRIMARY,
-                       font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
+                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", pady=3)
         self.create_nfo = ctk.BooleanVar(value=True)
         ParagonGradientCheckbox(opts, text="Create NFO", variable=self.create_nfo, fg_color=ParagonTheme.RED_PRIMARY,
-                       font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", pady=(12, 3))
+                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", pady=(12, 3))
     
     def _open_image_chooser(self, image_type: str):
         """Open image chooser dialog"""
@@ -9778,7 +9787,7 @@ class MovieEditorDialog(ctk.CTkToplevel):
         title_text = movie.get('title', 'Unknown')[:30]
         if movie.get('year'):
             title_text += f" ({movie['year']})"
-        lbl = ctk.CTkLabel(frame, text=title_text, anchor="w", font=ctk.CTkFont(size=self.FONT_SMALL),
+        lbl = ctk.CTkLabel(frame, text=title_text, anchor="w", font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL),
                           text_color=ParagonTheme.TEXT_PRIMARY)
         lbl.pack(fill="x", padx=10, pady=10)
         lbl.bind("<Button-1>", lambda e, idx=index: self._select_movie(idx))
@@ -9871,14 +9880,14 @@ class MovieEditorDialog(ctk.CTkToplevel):
                 row = ctk.CTkFrame(self.audio_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und'), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
                 ctk.CTkLabel(row, text=track.get('codec', ''), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
         else:
             ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
         
         for widget in self.subs_frame.winfo_children():
             widget.destroy()
@@ -9888,12 +9897,12 @@ class MovieEditorDialog(ctk.CTkToplevel):
                 row = ctk.CTkFrame(self.subs_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und'), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
         else:
             ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
     
     def _save_all(self):
         if not self.movie_details:
@@ -14261,13 +14270,13 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="TV Show title...",
                                          fg_color="transparent", border_width=0, width=350,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.search_entry.pack(side="left", padx=(15, 5), pady=10)
         self.search_entry.bind('<Return>', lambda e: self._search())
         
         self.year_entry = ctk.CTkEntry(search_frame, placeholder_text="Year",
                                        fg_color="transparent", border_width=0, width=100,
-                                       font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.year_entry.pack(side="left", padx=5, pady=10)
         
         ParagonButton(search_frame, text="SEARCH", command=self._search, width=120, height=45).pack(side="left", padx=(5, 15), pady=10)
@@ -14293,18 +14302,18 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(id_frame, text="TMDB ID", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['tmdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['tmdb_id'], width=150,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         
         ctk.CTkLabel(id_frame, text="TVDB ID", width=100, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['tvdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['tvdb_id'], width=120,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left")
         
         self._add_field(scroll, "Name", "title")
@@ -14316,41 +14325,41 @@ class TVEditorDialog(ctk.CTkToplevel):
         rating_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(rating_frame, text="Rating", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         rating_info = ctk.CTkFrame(rating_frame, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
         rating_info.pack(side="left", fill="x", expand=True)
         self.rating_label = ctk.CTkLabel(rating_info, text="TMDB: --",
                                          text_color=ParagonTheme.TEXT_PRIMARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.rating_label.pack(padx=10, pady=8, anchor="w")
         
         premiere_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         premiere_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(premiere_frame, text="Premiered", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['premiered'] = ctk.StringVar()
         ctk.CTkEntry(premiere_frame, textvariable=self.field_vars['premiered'], width=130,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         ctk.CTkLabel(premiere_frame, text="Status", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['status'] = ctk.StringVar()
         ParagonOptionMenu(premiere_frame, variable=self.field_vars['status'],
                          values=["", "Continuing", "Ended", "Canceled", "In Production"],
-                         font=ctk.CTkFont(size=self.FONT_NORMAL),
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                          width=200, height=36).pack(side="left")
 
         cert_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         cert_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(cert_frame, text="Certification", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
         ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         font=ctk.CTkFont(size=self.FONT_NORMAL),
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                          width=200, height=36).pack(side="left")
         
         self._add_field(scroll, "Network", "studio")
@@ -14359,9 +14368,9 @@ class TVEditorDialog(ctk.CTkToplevel):
         plot_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
         self.plot_text = ctk.CTkTextbox(plot_frame, height=120, fg_color=ParagonTheme.BG_DARK,
-                                        font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.plot_text.pack(side="left", fill="x", expand=True)
     
     def _add_field(self, parent, label, key, readonly=False):
@@ -14369,11 +14378,11 @@ class TVEditorDialog(ctk.CTkToplevel):
         frame.pack(fill="x", pady=4)
         ctk.CTkLabel(frame, text=label, width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars[key] = ctk.StringVar()
         entry = ctk.CTkEntry(frame, textvariable=self.field_vars[key],
                             fg_color=ParagonTheme.BG_DARK,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL),
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                             height=36,
                             state="disabled" if readonly else "normal")
         entry.pack(side="left", fill="x", expand=True)
@@ -14425,7 +14434,7 @@ class TVEditorDialog(ctk.CTkToplevel):
 
         self.custom_genre_entry = ctk.CTkEntry(
             add_row, width=220, height=36, placeholder_text="New genre...",
-            font=ctk.CTkFont(size=self.FONT_SMALL)
+            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)
         )
         self.custom_genre_entry.pack(side="left", padx=4)
         self.custom_genre_entry.bind("<Return>", lambda e: self._add_custom_genre())
@@ -14490,13 +14499,13 @@ class TVEditorDialog(ctk.CTkToplevel):
         else:
             ctk.CTkLabel(self.studios_frame, text="No network/studio yet — add one below",
                          text_color=ParagonTheme.TEXT_SECONDARY,
-                         font=ctk.CTkFont(size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
 
         add_row = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
         add_row.pack(fill="x", padx=10, pady=(6, 10))
         self.custom_studio_entry = ctk.CTkEntry(
             add_row, width=260, height=36, placeholder_text="New network/studio...",
-            font=ctk.CTkFont(size=self.FONT_SMALL)
+            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)
         )
         self.custom_studio_entry.pack(side="left", padx=4)
         self.custom_studio_entry.bind("<Return>", lambda e: self._add_custom_studio())
@@ -14576,7 +14585,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         file_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(file_frame, text="File", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         # Gradient-bordered box around the filename so it matches the fields
         file_box = GradientBorder(file_frame, bw=2, height=36)
         file_box.pack(side="left", fill="x", expand=True)
@@ -14586,7 +14595,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         file_box.attach(inner_file)
         self.ep_file_label = ctk.CTkLabel(inner_file, text="Select an episode", anchor="w",
                                           text_color=ParagonTheme.TEXT_PRIMARY,
-                                          font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                          font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.ep_file_label.pack(side="left", fill="x", expand=True, padx=10)
         
         # Season/Episode
@@ -14595,27 +14604,27 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(se_frame, text="Season", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_season'] = ctk.StringVar()
         make_grad_entry(se_frame, width=80, textvariable=self.episode_field_vars['ep_season'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
 
         ctk.CTkLabel(se_frame, text="Episode", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_episode'] = ctk.StringVar()
         make_grad_entry(se_frame, width=80, textvariable=self.episode_field_vars['ep_episode'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left")
         
         # Title
         title_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         title_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(title_frame, text="Title", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_title'] = ctk.StringVar()
         make_grad_entry(title_frame, textvariable=self.episode_field_vars['ep_title'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", fill="x", expand=True)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left", fill="x", expand=True)
         
         # Aired date and rating
         aired_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -14623,26 +14632,26 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(aired_frame, text="Aired", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_aired'] = ctk.StringVar()
         make_grad_entry(aired_frame, width=130, textvariable=self.episode_field_vars['ep_aired'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left", padx=(0, 20))
 
         ctk.CTkLabel(aired_frame, text="Rating", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_rating'] = ctk.StringVar()
         make_grad_entry(aired_frame, width=80, textvariable=self.episode_field_vars['ep_rating'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left")
         
         # Plot
         plot_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         plot_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
         self.ep_plot_text = ctk.CTkTextbox(plot_frame, height=100,
-                                           font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                           font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.ep_plot_text.pack(side="left", fill="x", expand=True)
         
         # Runtime and User Rating row
@@ -14651,31 +14660,31 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(runtime_frame, text="Runtime", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_runtime'] = ctk.StringVar()
         make_grad_entry(runtime_frame, width=80, textvariable=self.episode_field_vars['ep_runtime'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left")
         ctk.CTkLabel(runtime_frame, text="min", text_color=ParagonTheme.TEXT_MUTED,
-                    font=ctk.CTkFont(size=self.FONT_SMALL)).pack(side="left", padx=(5, 20))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)).pack(side="left", padx=(5, 20))
 
         ctk.CTkLabel(runtime_frame, text="User Rating", width=100, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_userrating'] = ctk.StringVar()
         make_grad_entry(runtime_frame, width=60, textvariable=self.episode_field_vars['ep_userrating'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL))[0].pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))[0].pack(side="left")
         ctk.CTkLabel(runtime_frame, text="/10", text_color=ParagonTheme.TEXT_MUTED,
-                    font=ctk.CTkFont(size=self.FONT_SMALL)).pack(side="left", padx=(5, 0))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_SMALL)).pack(side="left", padx=(5, 0))
         
         # Directors
         directors_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         directors_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(directors_frame, text="Director(s)", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_directors'] = ctk.StringVar()
         make_grad_entry(directors_frame, textvariable=self.episode_field_vars['ep_directors'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                         placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
         # Writers
@@ -14683,10 +14692,10 @@ class TVEditorDialog(ctk.CTkToplevel):
         writers_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(writers_frame, text="Writer(s)", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_writers'] = ctk.StringVar()
         make_grad_entry(writers_frame, textvariable=self.episode_field_vars['ep_writers'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                         placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
         # Guest Stars
@@ -14694,10 +14703,10 @@ class TVEditorDialog(ctk.CTkToplevel):
         guests_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(guests_frame, text="Guest Stars", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.episode_field_vars['ep_guests'] = ctk.StringVar()
         make_grad_entry(guests_frame, textvariable=self.episode_field_vars['ep_guests'],
-                        font=ctk.CTkFont(size=self.FONT_NORMAL),
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                         placeholder_text="Comma-separated names")[0].pack(side="left", fill="x", expand=True)
         
     def _manual_fetch_episode(self):
@@ -14811,9 +14820,9 @@ class TVEditorDialog(ctk.CTkToplevel):
             row.pack(fill="x", padx=15, pady=6)
             ctk.CTkLabel(row, text=field, width=140, anchor="w",
                         text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
             lbl = ctk.CTkLabel(row, text="--", anchor="w", text_color=ParagonTheme.TEXT_PRIMARY,
-                              font=ctk.CTkFont(size=self.FONT_NORMAL))
+                              font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
             lbl.pack(side="left", fill="x", expand=True)
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
         
@@ -14822,14 +14831,14 @@ class TVEditorDialog(ctk.CTkToplevel):
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
         self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
     
     def _create_episode_stream_tab(self, parent):
         """Create stream details tab for episodes"""
@@ -14847,9 +14856,9 @@ class TVEditorDialog(ctk.CTkToplevel):
             row.pack(fill="x", padx=15, pady=6)
             ctk.CTkLabel(row, text=field, width=140, anchor="w",
                         text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
             lbl = ctk.CTkLabel(row, text="--", anchor="w", text_color=ParagonTheme.TEXT_PRIMARY,
-                              font=ctk.CTkFont(size=self.FONT_NORMAL))
+                              font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
             lbl.pack(side="left", fill="x", expand=True)
             self.ep_video_info_labels[field.lower().replace(" ", "_")] = lbl
         
@@ -14858,14 +14867,14 @@ class TVEditorDialog(ctk.CTkToplevel):
                                            border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.ep_audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.ep_audio_frame, text="Select an episode", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
         self.ep_subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=6,
                                           border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.ep_subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.ep_subs_frame, text="Select an episode", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
     
     def _update_episode_stream_display(self):
         """Update stream display for current episode"""
@@ -14885,14 +14894,14 @@ class TVEditorDialog(ctk.CTkToplevel):
                 row = ctk.CTkFrame(self.ep_audio_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und').upper(), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
                 ctk.CTkLabel(row, text=track.get('codec', ''), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
         else:
             ctk.CTkLabel(self.ep_audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
         
         # Subtitles
         for widget in self.ep_subs_frame.winfo_children():
@@ -14903,12 +14912,12 @@ class TVEditorDialog(ctk.CTkToplevel):
                 row = ctk.CTkFrame(self.ep_subs_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und').upper(), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
         else:
             ctk.CTkLabel(self.ep_subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
     
     def _populate_from_nfo(self, show_data: Dict):
         """Populate the editor UI with data from tvshow.nfo"""
@@ -15086,7 +15095,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         # Poster
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4, cursor="hand2",
                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
@@ -15099,7 +15108,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         # Logo
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4, cursor="hand2",
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
@@ -15111,7 +15120,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         # Fanart
         ctk.CTkLabel(scroll, text="Fanart (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=120, corner_radius=4, cursor="hand2",
                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.fanart_frame.pack(fill="x", padx=8, pady=(0, 14))
@@ -15123,7 +15132,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         
         # Landscape
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4, cursor="hand2",
                                             border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
@@ -15631,13 +15640,13 @@ if HAS_DND:
         
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="TV Show title...",
                                          fg_color="transparent", border_width=0, width=350,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.search_entry.pack(side="left", padx=(15, 5), pady=10)
         self.search_entry.bind('<Return>', lambda e: self._search())
         
         self.year_entry = ctk.CTkEntry(search_frame, placeholder_text="Year",
                                        fg_color="transparent", border_width=0, width=100,
-                                       font=ctk.CTkFont(size=self.FONT_NORMAL), height=45)
+                                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), height=45)
         self.year_entry.pack(side="left", padx=5, pady=10)
         
         ParagonButton(search_frame, text="SEARCH", command=self._search, width=120, height=45).pack(side="left", padx=(5, 15), pady=10)
@@ -15664,18 +15673,18 @@ if HAS_DND:
         
         ctk.CTkLabel(id_frame, text="TMDB ID", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['tmdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['tmdb_id'], width=150,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         
         ctk.CTkLabel(id_frame, text="TVDB ID", width=100, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['tvdb_id'] = ctk.StringVar()
         ctk.CTkEntry(id_frame, textvariable=self.field_vars['tvdb_id'], width=120,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left")
         
         self._add_field(scroll, "Name", "title")
@@ -15688,12 +15697,12 @@ if HAS_DND:
         rating_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(rating_frame, text="Rating", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         rating_info = ctk.CTkFrame(rating_frame, fg_color=ParagonTheme.BG_DARK, corner_radius=4)
         rating_info.pack(side="left", fill="x", expand=True)
         self.rating_label = ctk.CTkLabel(rating_info, text="TMDB: --",
                                          text_color=ParagonTheme.TEXT_PRIMARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.rating_label.pack(padx=10, pady=8, anchor="w")
         
         # Premiere and Status
@@ -15701,20 +15710,20 @@ if HAS_DND:
         premiere_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(premiere_frame, text="Premiered", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['premiered'] = ctk.StringVar()
         ctk.CTkEntry(premiere_frame, textvariable=self.field_vars['premiered'], width=130,
-                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(size=self.FONT_NORMAL),
+                    fg_color=ParagonTheme.BG_DARK, font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                     height=36).pack(side="left", padx=(0, 20))
         ctk.CTkLabel(premiere_frame, text="Status", width=80, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['status'] = ctk.StringVar()
         ctk.CTkOptionMenu(premiere_frame, variable=self.field_vars['status'],
                          values=["", "Continuing", "Ended", "Canceled", "In Production"],
                          fg_color=ParagonTheme.BG_DARK,
                          button_color=ParagonTheme.RED_PRIMARY,
-                         font=ctk.CTkFont(size=self.FONT_NORMAL),
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                          height=36).pack(side="left")
         
         # Certification
@@ -15722,11 +15731,11 @@ if HAS_DND:
         cert_frame.pack(fill="x", pady=4)
         ctk.CTkLabel(cert_frame, text="Certification", width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars['certification'] = ctk.StringVar()
         ParagonOptionMenu(cert_frame, variable=self.field_vars['certification'],
                          values=[""] + self.CERTIFICATIONS,
-                         font=ctk.CTkFont(size=self.FONT_NORMAL),
+                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                          width=200, height=36).pack(side="left")
 
         # Network/Studio
@@ -15737,9 +15746,9 @@ if HAS_DND:
         plot_frame.pack(fill="x", pady=6)
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
         self.plot_text = ctk.CTkTextbox(plot_frame, height=120, fg_color=ParagonTheme.BG_DARK,
-                                        font=ctk.CTkFont(size=self.FONT_NORMAL))
+                                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
         self.plot_text.pack(side="left", fill="x", expand=True)
     
     def _add_field(self, parent, label, key, readonly=False):
@@ -15747,11 +15756,11 @@ if HAS_DND:
         frame.pack(fill="x", pady=4)
         ctk.CTkLabel(frame, text=label, width=120, anchor="e",
                     text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         self.field_vars[key] = ctk.StringVar()
         entry = ctk.CTkEntry(frame, textvariable=self.field_vars[key],
                             fg_color=ParagonTheme.BG_DARK,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL),
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL),
                             height=36,
                             state="disabled" if readonly else "normal")
         entry.pack(side="left", fill="x", expand=True)
@@ -15813,9 +15822,9 @@ if HAS_DND:
             row.pack(fill="x", padx=15, pady=6)
             ctk.CTkLabel(row, text=field, width=140, anchor="w",
                         text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
             lbl = ctk.CTkLabel(row, text="--", anchor="w", text_color=ParagonTheme.TEXT_PRIMARY,
-                              font=ctk.CTkFont(size=self.FONT_NORMAL))
+                              font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL))
             lbl.pack(side="left", fill="x", expand=True)
             self.video_info_labels[field.lower().replace(" ", "_")] = lbl
         
@@ -15824,14 +15833,14 @@ if HAS_DND:
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.audio_frame.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
         
         ParagonLabel(scroll, text="Subtitles", style="header").pack(anchor="w", pady=(0, 8))
         self.subs_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_TERTIARY, corner_radius=8,
                                        border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.subs_frame.pack(fill="x", pady=(0, 15))
         ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=15)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=15)
     
     def _update_stream_display(self):
         if not self.stream_info:
@@ -15857,16 +15866,16 @@ if HAS_DND:
                 row = ctk.CTkFrame(self.audio_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und').upper(), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
                 ctk.CTkLabel(row, text=track.get('codec', ''), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
                 ctk.CTkLabel(row, text=f"{track.get('channels', '')}ch", text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
         else:
             ctk.CTkLabel(self.audio_frame, text="No audio tracks", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
         
         for widget in self.subs_frame.winfo_children():
             widget.destroy()
@@ -15876,12 +15885,12 @@ if HAS_DND:
                 row = ctk.CTkFrame(self.subs_frame, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=4)
                 ctk.CTkLabel(row, text=f"Track {i+1}", width=80, text_color=ParagonTheme.TEXT_SECONDARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left")
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left")
                 ctk.CTkLabel(row, text=track.get('language', 'und').upper(), text_color=ParagonTheme.TEXT_PRIMARY,
-                            font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=15)
+                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(side="left", padx=15)
         else:
             ctk.CTkLabel(self.subs_frame, text="No subtitles", text_color=ParagonTheme.TEXT_SECONDARY,
-                        font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(padx=15, pady=10)
+                        font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(padx=15, pady=10)
     
     def _create_artwork_panel(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
@@ -15889,56 +15898,56 @@ if HAS_DND:
         
         # Poster
         ctk.CTkLabel(scroll, text="Poster (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.poster_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=180, corner_radius=4,
                                          cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.poster_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.poster_frame.pack_propagate(False)
         self.poster_label = ctk.CTkLabel(self.poster_frame, text="No Poster\n(Click to choose)", 
                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.poster_label.pack(expand=True)
         self.poster_frame.bind("<Button-1>", lambda e: self._choose_artwork('poster'))
         self.poster_label.bind("<Button-1>", lambda e: self._choose_artwork('poster'))
         
         # Logo
         ctk.CTkLabel(scroll, text="Logo (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.logo_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=70, corner_radius=4,
                                        cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.logo_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.logo_frame.pack_propagate(False)
         self.logo_label = ctk.CTkLabel(self.logo_frame, text="No Logo\n(Click to choose)",
                                        text_color=ParagonTheme.TEXT_SECONDARY,
-                                       font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                       font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.logo_label.pack(expand=True)
         self.logo_frame.bind("<Button-1>", lambda e: self._choose_artwork('logo'))
         self.logo_label.bind("<Button-1>", lambda e: self._choose_artwork('logo'))
         
         # Fanart
         ctk.CTkLabel(scroll, text="Fanart (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.fanart_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=120, corner_radius=4,
                                          cursor="hand2")
         self.fanart_frame.pack(fill="x", padx=8, pady=(0, 12))
         self.fanart_frame.pack_propagate(False)
         self.fanart_label = ctk.CTkLabel(self.fanart_frame, text="No Fanart\n(Click to choose)",
                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                         font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                         font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.fanart_label.pack(expand=True)
         self.fanart_frame.bind("<Button-1>", lambda e: self._choose_artwork('fanart'))
         self.fanart_label.bind("<Button-1>", lambda e: self._choose_artwork('fanart'))
         
         # Landscape
         ctk.CTkLabel(scroll, text="Landscape (click to choose)", text_color=ParagonTheme.TEXT_SECONDARY,
-                    font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
+                    font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL)).pack(anchor="w", padx=8)
         self.landscape_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, height=100, corner_radius=4,
                                             cursor="hand2", border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.landscape_frame.pack(fill="x", padx=8, pady=(0, 14))
         self.landscape_frame.pack_propagate(False)
         self.landscape_label = ctk.CTkLabel(self.landscape_frame, text="No Landscape\n(Click to choose)",
                                             text_color=ParagonTheme.TEXT_SECONDARY,
-                                            font=ctk.CTkFont(size=self.FONT_NORMAL), cursor="hand2")
+                                            font=ctk.CTkFont(family="Bebas Neue", size=self.FONT_NORMAL), cursor="hand2")
         self.landscape_label.pack(expand=True)
         self.landscape_frame.bind("<Button-1>", lambda e: self._choose_artwork('landscape'))
         self.landscape_label.bind("<Button-1>", lambda e: self._choose_artwork('landscape'))
@@ -20063,8 +20072,11 @@ class HarvesterDialog(ctk.CTkToplevel):
 
     # ---- UI -------------------------------------------------------------
     def _create_ui(self, cfg):
-        main = ctk.CTkFrame(self, fg_color=ParagonTheme.BG_DARK)
-        main.pack(fill="both", expand=True)
+        # Gold-bordered outer frame around the whole page (matches the editors).
+        outer = ctk.CTkFrame(self, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+        outer.pack(fill="both", expand=True, padx=4, pady=4)
+        main = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+        main.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Branded banner header (drops in paragon_banner.png next to the script
         # if present, otherwise draws the red->orange diagonal streaks).
