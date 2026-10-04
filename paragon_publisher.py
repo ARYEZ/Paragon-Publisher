@@ -2590,6 +2590,27 @@ class PlotSummarizer:
         sents = [s for s in sents if len(s.split()) > 3]
         return " ".join(sents[:max_sentences]).strip()
 
+    @staticmethod
+    def check_ollama(url="http://localhost:11434", model="llama3.1"):
+        """Return (ok, message): is Ollama reachable and is `model` installed?"""
+        try:
+            req = urllib.request.Request(url.rstrip("/") + "/api/tags")
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:
+            return False, (f"Can't reach Ollama at {url}\n({e})\n\n"
+                           "Make sure Ollama is installed and running\n(https://ollama.com/download).")
+        names = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        if not names:
+            return False, ("Ollama is running, but no models are installed.\n\nPull one, e.g.:\n"
+                           f"    ollama pull {model or 'llama3.1'}")
+        base = (model or "").split(":")[0]
+        found = any(n == model or n == f"{model}:latest" or n.split(":")[0] == base for n in names)
+        if found:
+            return True, f"✓ Ollama is running and '{model}' is available.\n\nInstalled: {', '.join(names)}"
+        return False, (f"Ollama is running, but '{model}' isn't installed.\n\n"
+                       f"Installed: {', '.join(names)}\n\nPull it with:\n    ollama pull {model}")
+
 
 class NFOGenerator:
     """Generate NFO files for Kodi/Plex/Jellyfin"""
@@ -13699,7 +13720,9 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ollama_url_e.pack(side="left", padx=(4, 8))
         ollama_model_e = ParagonEntry(row2, width=150, height=36)
         ollama_model_e.insert(0, pconfig_get("plot_ollama_model", "llama3.1"))
-        ollama_model_e.pack(side="left", padx=(0, 0))
+        ollama_model_e.pack(side="left", padx=(0, 8))
+        ParagonButton(row2, text="TEST", width=80, height=36,
+                      command=lambda: _test_ollama()).pack(side="left")
 
         row3 = ctk.CTkFrame(ctrl, fg_color="transparent"); row3.pack(fill="x", padx=10, pady=(0, 8))
         ParagonLabel(row3, text="Cloud", style="muted", width=70, anchor="w").pack(side="left")
@@ -13816,6 +13839,20 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             self.after(0, lambda: (prog.configure(
                 text=f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
                 _set_bar(1.0), gen_btn.configure(state="normal")))
+
+        def _test_ollama():
+            u = ollama_url_e.get().strip() or "http://localhost:11434"
+            m = ollama_model_e.get().strip() or "llama3.1"
+            prog.configure(text="Testing Ollama…")
+
+            def run():
+                ok, msg = PlotSummarizer.check_ollama(u, m)
+                def show():
+                    prog.configure(text="Ollama ✓" if ok else "Ollama test failed")
+                    (messagebox.showinfo if ok else messagebox.showwarning)(
+                        "Ollama Test", msg, parent=dlg)
+                self.after(0, show)
+            threading.Thread(target=run, daemon=True).start()
 
         def _generate():
             source = source_var.get()
