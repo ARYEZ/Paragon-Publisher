@@ -4094,7 +4094,7 @@ class GradientBorder(tk.Canvas):
     the gradient shows only as a border frame around it. The child is embedded
     via a canvas window (not place) because CTk widgets reject width/height in
     place()."""
-    def __init__(self, master, bw=1, radius=8, height=36, width=200, **kw):
+    def __init__(self, master, bw=2, radius=8, height=36, width=200, **kw):
         super().__init__(master, highlightthickness=0, bd=0, bg=ParagonTheme.BG_DARK,
                          height=height, width=width, **kw)
         self._bw = bw
@@ -4117,28 +4117,34 @@ class GradientBorder(tk.Canvas):
             if w < 4 or h < 4:
                 return
             self.delete("grad")
-            photo = make_gradient_ring_photo(w, h, bw=self._bw, radius=self._radius)
+            # Filled rounded gradient BEHIND the child. The child (opaque,
+            # inset by bw) covers the interior, leaving a thin gradient frame on
+            # the straight edges while the rounded corners fill out to the arc —
+            # so the corners read as rounded even though straight edges stay thin.
+            # (A thin "ring" doesn't work here: Tk always draws embedded widgets
+            # on top of canvas graphics, so the ring's rounded corner would be
+            # hidden under the child's square corner.)
+            photo = make_gradient_photo(w, h, left_hex="#d81d45",
+                                        right_hex=ParagonTheme.GOLD,
+                                        radius=self._radius, gloss=False, border_hex=None)
             if photo is not None:
                 self._photo = photo
                 self.create_image(0, 0, image=photo, anchor="nw", tags="grad")
             else:
                 self.create_rectangle(1, 1, w - 1, h - 1, outline=ParagonTheme.GOLD,
                                       tags="grad")
+            self.tag_lower("grad")
             if self._win is not None:
                 bw = self._bw
                 self.coords(self._win, bw, bw)
                 self.itemconfigure(self._win, width=max(1, w - 2 * bw),
                                    height=max(1, h - 2 * bw))
-            # Draw the ring ABOVE the embedded child: the ring has a transparent
-            # interior, so it only paints the thin border band — including the
-            # rounded corners — over the child's square corners.
-            self.tag_raise("grad")
         except Exception:
             pass
 
 
 def make_grad_entry(parent, *, width=None, height=36, textvariable=None,
-                    placeholder_text="", font=None, bw=1):
+                    placeholder_text="", font=None, bw=2):
     """Create a CTkEntry wrapped in a Paragon gradient border. Returns the
     GradientBorder box (pack/grid it) and the inner entry."""
     box_w = (int(width) + 2 * bw) if width else 200
@@ -14096,7 +14102,7 @@ class TVEditorDialog(ctk.CTkToplevel):
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10))
         # Gradient-bordered box around the filename so it matches the fields
-        file_box = GradientBorder(file_frame, bw=1, height=36)
+        file_box = GradientBorder(file_frame, bw=2, height=36)
         file_box.pack(side="left", fill="x", expand=True)
         inner_file = ctk.CTkFrame(file_box, fg_color=ParagonTheme.BG_DARK,
                                   bg_color=ParagonTheme.BG_DARK,
@@ -14159,7 +14165,7 @@ class TVEditorDialog(ctk.CTkToplevel):
         ctk.CTkLabel(plot_frame, text="Plot", width=120, anchor="ne",
                     text_color=ParagonTheme.TEXT_SECONDARY,
                     font=ctk.CTkFont(size=self.FONT_NORMAL)).pack(side="left", padx=(0, 10), anchor="n")
-        plot_box = GradientBorder(plot_frame, bw=1, height=100)
+        plot_box = GradientBorder(plot_frame, bw=2, height=100)
         plot_box.pack(side="left", fill="x", expand=True)
         self.ep_plot_text = ctk.CTkTextbox(plot_box, fg_color=ParagonTheme.BG_DARK,
                                            bg_color=ParagonTheme.BG_DARK,
