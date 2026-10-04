@@ -8584,11 +8584,10 @@ class MovieEditorDialog(ctk.CTkToplevel):
         # Set countries
         self.selected_countries = set(movie_data.get('countries', []))
         
-        # Set studio - update the label
+        # Set studios (may be a comma-separated string from the NFO)
         if movie_data.get('studio'):
-            self.selected_studios = {movie_data['studio']}
-            if hasattr(self, 'studios_label'):
-                self.studios_label.configure(text=movie_data['studio'])
+            self.selected_studios = {s.strip() for s in str(movie_data['studio']).split(',') if s.strip()}
+            self._create_studio_chips()
         
         # Update stream info from NFO if available
         stream_details = movie_data.get('stream_details', {})
@@ -9109,67 +9108,107 @@ class MovieEditorDialog(ctk.CTkToplevel):
     def _create_extended_tab(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         ParagonLabel(scroll, text="Genres", style="header").pack(anchor="w", pady=(0, 8))
-        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6)
-        self.genres_frame.pack(fill="x", pady=(0, 20))
+        self.genres_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        self.genres_frame.pack(fill="x", pady=(0, 18))
         self._create_genre_chips()
-        
+
         ParagonLabel(scroll, text="Studios", style="header").pack(anchor="w", pady=(0, 8))
-        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=6, height=80)
+        self.studios_frame = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
+                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         self.studios_frame.pack(fill="x", pady=(0, 15))
-        self.studios_label = ctk.CTkLabel(self.studios_frame, text="No studios", 
-                                          text_color=ParagonTheme.TEXT_SECONDARY,
-                                          font=ctk.CTkFont(size=self.FONT_NORMAL))
-        self.studios_label.pack(padx=15, pady=15, anchor="w")
-    
+        self._create_studio_chips()
+
+    def _chip_width(self, text):
+        return max(84, int(len(str(text)) * 11) + 26)
+
     def _create_genre_chips(self):
         for widget in self.genres_frame.winfo_children():
             widget.destroy()
-        
+
         all_genres = self.get_all_genres()
         row_frame = None
         for i, genre in enumerate(all_genres):
-            if i % 5 == 0:  # 5 per row for larger buttons
+            if i % 5 == 0:  # 5 per row
                 row_frame = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
-                row_frame.pack(fill="x", padx=8, pady=4)
-            
-            is_selected = genre in self.selected_genres
-            btn = ctk.CTkButton(
-                row_frame, text=genre, height=36,
-                fg_color=ParagonTheme.RED_PRIMARY if is_selected else ParagonTheme.BG_TERTIARY,
-                hover_color=ParagonTheme.RED_LIGHT if is_selected else ParagonTheme.BG_HOVER,
-                text_color=ParagonTheme.TEXT_PRIMARY,
-                corner_radius=18,
-                font=ctk.CTkFont(size=self.FONT_SMALL),
+                row_frame.pack(fill="x", padx=10, pady=4)
+
+            btn = ParagonButton(
+                row_frame, text=genre, height=34, width=self._chip_width(genre),
+                fg_color=ParagonTheme.RED_PRIMARY, corner_radius=17,
                 command=lambda g=genre: self._toggle_genre(g)
             )
-            btn.pack(side="left", padx=3, pady=3)
-        
-        # Add "+" button for custom genre on a new row
+            btn.pack(side="left", padx=4, pady=4)
+            btn.set_selected(genre in self.selected_genres)
+
+        # New-genre entry + gradient ADD button
         add_row = ctk.CTkFrame(self.genres_frame, fg_color="transparent")
-        add_row.pack(fill="x", padx=8, pady=8)
-        
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+
         self.custom_genre_entry = ctk.CTkEntry(
-            add_row, width=200, height=36,
-            placeholder_text="New genre...",
-            fg_color=ParagonTheme.BG_DARK,
-            border_color=ParagonTheme.BORDER_DARK,
+            add_row, width=220, height=36, placeholder_text="New genre...",
             font=ctk.CTkFont(size=self.FONT_SMALL)
         )
-        self.custom_genre_entry.pack(side="left", padx=3)
+        self.custom_genre_entry.pack(side="left", padx=4)
         self.custom_genre_entry.bind("<Return>", lambda e: self._add_custom_genre())
-        
-        ctk.CTkButton(
-            add_row, text="+ ADD", height=36, width=80,
-            fg_color=ParagonTheme.GOLD,
-            hover_color=ParagonTheme.GOLD_LIGHT,
-            text_color=ParagonTheme.BG_DARK,
-            corner_radius=18,
-            font=ctk.CTkFont(size=self.FONT_SMALL, weight="bold"),
-            command=self._add_custom_genre
-        ).pack(side="left", padx=3)
-    
+
+        ParagonButton(
+            add_row, text="+ ADD", height=36, width=90, corner_radius=17,
+            fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_genre
+        ).pack(side="left", padx=4)
+
+    def _create_studio_chips(self):
+        if not hasattr(self, 'studios_frame'):
+            return
+        for widget in self.studios_frame.winfo_children():
+            widget.destroy()
+
+        studios = sorted(self.selected_studios)
+        if studios:
+            row_frame = None
+            for i, studio in enumerate(studios):
+                if i % 3 == 0:
+                    row_frame = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
+                    row_frame.pack(fill="x", padx=10, pady=4)
+                btn = ParagonButton(
+                    row_frame, text=f"{studio}  ✕", height=34,
+                    width=self._chip_width(studio) + 20,
+                    fg_color=ParagonTheme.RED_PRIMARY, corner_radius=17,
+                    command=lambda s=studio: self._remove_studio(s)
+                )
+                btn.pack(side="left", padx=4, pady=4)
+                btn.set_selected(True)
+        else:
+            ctk.CTkLabel(self.studios_frame, text="No studios yet — add one below",
+                         text_color=ParagonTheme.TEXT_SECONDARY,
+                         font=ctk.CTkFont(size=self.FONT_SMALL)).pack(anchor="w", padx=12, pady=(10, 2))
+
+        add_row = ctk.CTkFrame(self.studios_frame, fg_color="transparent")
+        add_row.pack(fill="x", padx=10, pady=(6, 10))
+        self.custom_studio_entry = ctk.CTkEntry(
+            add_row, width=240, height=36, placeholder_text="New studio...",
+            font=ctk.CTkFont(size=self.FONT_SMALL)
+        )
+        self.custom_studio_entry.pack(side="left", padx=4)
+        self.custom_studio_entry.bind("<Return>", lambda e: self._add_custom_studio())
+        ParagonButton(
+            add_row, text="+ ADD", height=36, width=90, corner_radius=17,
+            fg_color=ParagonTheme.RED_PRIMARY, command=self._add_custom_studio
+        ).pack(side="left", padx=4)
+
+    def _add_custom_studio(self):
+        studio = self.custom_studio_entry.get().strip()
+        if not studio:
+            return
+        self.selected_studios.add(studio)
+        self._create_studio_chips()
+
+    def _remove_studio(self, studio):
+        self.selected_studios.discard(studio)
+        self._create_studio_chips()
+
     def _add_custom_genre(self):
         """Add a custom genre"""
         genre = self.custom_genre_entry.get().strip()
@@ -9513,8 +9552,9 @@ class MovieEditorDialog(ctk.CTkToplevel):
         
         studios = details.get('production_companies', [])
         if studios:
-            self.studios_label.configure(text=", ".join(studios[:5]))
-        
+            self.selected_studios = set(studios)
+            self._create_studio_chips()
+
         self._update_stream_display()
         
         if poster_data and HAS_PIL:
@@ -9588,7 +9628,8 @@ class MovieEditorDialog(ctk.CTkToplevel):
         self.movie_details['certification'] = self.field_vars['certification'].get()
         self.movie_details['overview'] = self.plot_text.get("1.0", "end").strip()
         self.movie_details['genres'] = list(self.selected_genres)
-        
+        self.movie_details['production_companies'] = list(self.selected_studios)
+
         success = 0
         errors = []
         
