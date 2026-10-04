@@ -3602,9 +3602,11 @@ class ParagonButton(tk.Canvas):
             else:
                 # Flat fill (dark "secondary-styled" buttons)
                 base = (self._hover_color or _lighten(self._c1, 1.2)) if self._hover else self._c1
+                # Preserve prior look: no explicit border => default orange outline
+                flat_border = self._border_color if self._border_color else _DEFAULT_BORDER
                 photo = make_gradient_photo(w, h, left_hex=base, right_hex=base,
                                             radius=self._corner, gloss=False,
-                                            border_hex=self._border_color)
+                                            border_hex=flat_border)
                 if photo is not None:
                     self._photo = photo
                     self.create_image(0, 0, image=photo, anchor="nw")
@@ -10261,16 +10263,21 @@ def _hex_rgb(h):
 _GRADIENT_CACHE = {}
 
 
+_DEFAULT_BORDER = object()  # sentinel: distinguishes "no border" (None) from default
+
+
 def _build_gradient_pil(width, height, left_hex=None, right_hex=None,
-                        radius=8, border_hex=None, gloss=True):
+                        radius=8, border_hex=_DEFAULT_BORDER, gloss=True):
     """Build a horizontal red→orange Paragon gradient as an RGBA PIL image with
     rounded corners (and an optional border/top gloss). Returns None if Pillow
-    isn't available."""
+    isn't available. Pass border_hex=None to draw NO outline (so the gradient
+    itself is the only colour, e.g. for a thin gradient border)."""
     if not HAS_PIL:
         return None
     left_hex = left_hex or "#d81d45"            # bright pink-red (from skin)
     right_hex = right_hex or ParagonTheme.GOLD  # orange
-    border_hex = border_hex or "#ff8a3d"
+    if border_hex is _DEFAULT_BORDER:
+        border_hex = "#ff8a3d"
     width = max(2, int(width))
     height = max(2, int(height))
     try:
