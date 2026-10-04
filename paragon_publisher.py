@@ -2494,10 +2494,37 @@ class AudioTranscriber:
         return AudioTranscriber._model
 
     @staticmethod
+    def _decode_pcm(filepath, sr=16000, max_seconds=0):
+        """Decode audio to a 16 kHz mono float32 numpy array using ffmpeg. This
+        bypasses faster-whisper's built-in PyAV decoder, which is broken on some
+        Python/PyAV combos (e.g. the 'metadata_errors' TypeError on Python 3.14)."""
+        import shutil, subprocess
+        import numpy as np
+        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+        cmd = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-i", filepath]
+        if max_seconds and max_seconds > 0:
+            cmd += ["-t", str(int(max_seconds))]
+        cmd += ["-f", "s16le", "-ac", "1", "-ar", str(sr), "-"]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0 or not proc.stdout:
+            raise RuntimeError("ffmpeg decode failed: " +
+                               proc.stderr.decode("utf-8", "replace")[:200])
+        return np.frombuffer(proc.stdout, np.int16).astype(np.float32) / 32768.0
+
+    @staticmethod
     def transcribe(filepath, model_size="base", max_seconds=0, progress_cb=None):
         """Return the transcript text. max_seconds > 0 stops early (to cap time)."""
         model = AudioTranscriber._get_model(model_size)
-        segments, info = model.transcribe(filepath, beam_size=1)
+        # Decode with ffmpeg ourselves (robust); only fall back to the file path
+        # (PyAV) if ffmpeg/numpy aren't available.
+        audio_input = filepath
+        capped = max_seconds
+        try:
+            audio_input = AudioTranscriber._decode_pcm(filepath, max_seconds=max_seconds)
+            capped = 0  # already trimmed by ffmpeg
+        except Exception as e:
+            print(f"ffmpeg decode unavailable ({e}); falling back to PyAV path")
+        segments, info = model.transcribe(audio_input, beam_size=1)
         total = getattr(info, 'duration', 0) or 0
         parts = []
         for seg in segments:
@@ -2507,7 +2534,7 @@ class AudioTranscriber:
                     progress_cb(min(1.0, (seg.end or 0) / total))
                 except Exception:
                     pass
-            if max_seconds and (seg.end or 0) >= max_seconds:
+            if capped and (seg.end or 0) >= capped:
                 break
         return " ".join(p.strip() for p in parts).strip()
 
@@ -13691,13 +13718,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                                        border_width=0)
             ep['box'].pack(fill="x", padx=10, pady=(2, 10))
 
-        def _apply_row(ep, plot, src):
+        def _apply_row(ep, text, src, check=None):
             try:
                 ep['box'].delete("1.0", "end")
-                ep['box'].insert("1.0", plot or "")
+                ep['box'].insert("1.0", text or "")
                 ep['src_lbl'].configure(text=src or "not found")
-                if plot:
-                    ep['inc'].set(True)
+                ep['inc'].set(bool(check) if check is not None else bool(text))
             except Exception:
                 pass
 
@@ -13716,11 +13742,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 else:
                     self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Transcribing E{epn:02d}… ({i}/{n})"))
                     transcript = ""
+                    err = ""
                     try:
                         transcript = AudioTranscriber.transcribe(ep['file'], wmodel, max_seconds=maxsec)
                     except Exception as e:
-                        print(f"transcribe error: {e}")
-                        self.after(0, lambda ep=ep: ep['src_lbl'].configure(text="transcribe error"))
+                        err = f"{type(e).__name__}: {e}"
+                        print(f"transcribe error on {ep['file']}: {err}")
                     if transcript:
                         self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Summarizing E{epn:02d}… ({i}/{n})"))
                         try:
@@ -13737,6 +13764,11 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                             print(f"summarize error: {e}")
                             plot = PlotSummarizer.extractive(transcript)
                             src = "Whisper (extractive — summary failed)"
+                    elif err:
+                        # surface the error in the row so it isn't hidden
+                        self.after(0, lambda ep=ep, err=err: _apply_row(ep, "⚠ " + err,
+                                                                        "transcribe error", check=False))
+                        continue
                 if plot:
                     found += 1
                 self.after(0, lambda ep=ep, plot=plot, src=src: _apply_row(ep, plot, src))
