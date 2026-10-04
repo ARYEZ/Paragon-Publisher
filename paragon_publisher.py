@@ -20301,39 +20301,27 @@ class HarvesterDialog(ctk.CTkToplevel):
                                          fg_color=ParagonTheme.BG_TERTIARY,
                                          hover_color=ParagonTheme.BG_HOVER)
         self.monitor_btn.pack(side="left", padx=(0, 10))
-        self.stop_btn = ParagonSecondaryButton(actions, text="⏹ STOP",
-                                               command=self._request_stop, width=110, height=40)
+        self.stop_btn = ParagonButton(actions, text="⏹ STOP",
+                                      command=self._request_stop, width=110, height=40)
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
-        self.reset_show_btn = ParagonSecondaryButton(actions, text="↺ RESET SHOW",
-                                                     command=self._reset_show, width=150, height=40,
-                                                     fg_color=ParagonTheme.BG_TERTIARY,
-                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.reset_show_btn = ParagonButton(actions, text="↺ RESET SHOW",
+                                            command=self._reset_show, width=150, height=40)
         self.reset_show_btn.pack(side="left", padx=(10, 0))
-        self.fix_titles_btn = ParagonSecondaryButton(actions, text="🧹 FIX TITLES",
-                                                     command=self._fix_titles, width=140, height=40,
-                                                     fg_color=ParagonTheme.BG_TERTIARY,
-                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.fix_titles_btn = ParagonButton(actions, text="🧹 FIX TITLES",
+                                            command=self._fix_titles, width=140, height=40)
         self.fix_titles_btn.pack(side="left", padx=(10, 0))
-        self.fix_genre_btn = ParagonSecondaryButton(actions, text="🎬 FIX GENRE",
-                                                    command=self._fix_genre, width=140, height=40,
-                                                    fg_color=ParagonTheme.BG_TERTIARY,
-                                                    hover_color=ParagonTheme.BG_HOVER)
+        self.fix_genre_btn = ParagonButton(actions, text="🎬 FIX GENRE",
+                                           command=self._fix_genre, width=140, height=40)
         self.fix_genre_btn.pack(side="left", padx=(10, 0))
-        self.fix_plots_btn = ParagonSecondaryButton(actions, text="📝 FIX PLOTS",
-                                                    command=self._fix_plots, width=140, height=40,
-                                                    fg_color=ParagonTheme.BG_TERTIARY,
-                                                    hover_color=ParagonTheme.BG_HOVER)
+        self.fix_plots_btn = ParagonButton(actions, text="📝 FIX PLOTS",
+                                           command=self._fix_plots, width=140, height=40)
         self.fix_plots_btn.pack(side="left", padx=(10, 0))
-        self.prune_btn = ParagonSecondaryButton(actions, text="✂ PRUNE",
-                                                command=self._prune_duration, width=120, height=40,
-                                                fg_color=ParagonTheme.BG_TERTIARY,
-                                                hover_color=ParagonTheme.BG_HOVER)
+        self.prune_btn = ParagonButton(actions, text="✂ PRUNE",
+                                       command=self._prune_duration, width=120, height=40)
         self.prune_btn.pack(side="left", padx=(10, 0))
-        self.fix_movies_btn = ParagonSecondaryButton(actions, text="🎞 FIX MOVIES",
-                                                     command=self._fix_movies, width=150, height=40,
-                                                     fg_color=ParagonTheme.BG_TERTIARY,
-                                                     hover_color=ParagonTheme.BG_HOVER)
+        self.fix_movies_btn = ParagonButton(actions, text="🎞 FIX MOVIES",
+                                            command=self._fix_movies, width=150, height=40)
         self.fix_movies_btn.pack(side="left", padx=(10, 0))
         ParagonSecondaryButton(actions, text="CLOSE", command=self._on_close,
                                width=100, height=40).pack(side="right")
