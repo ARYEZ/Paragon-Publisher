@@ -2562,7 +2562,9 @@ class PlotSummarizer:
                 f'teaser does. Do not mention that this is a transcript, do not add commentary '
                 f'or headings. Do NOT begin with meta lead-ins such as "In the latest episode of '
                 f'{series}," / "In this episode," / "This episode of {series}..." — start directly '
-                f'with the characters and the situation. Transcript:\n\n{t}')
+                f'with the characters and the situation. Do NOT preface your answer with a line '
+                f'like "Here is a synopsis:" or "Episode synopsis:" — output only the synopsis '
+                f'text itself. Transcript:\n\n{t}')
 
     @staticmethod
     def _clean_summary(text, series=""):
@@ -2575,6 +2577,10 @@ class PlotSummarizer:
         if len(s) >= 2 and s[0] in '"“‘\'' and s[-1] in '"”’\'':
             s = s[1:-1].strip()
         lead_patterns = [
+            # Preamble line: 'Sure! Here is a 3-sentence episode synopsis for "X" ...:'
+            r'^\s*(?:sure[,!.]?\s+)?here(?:\'s|\s+is|\s+are)\b[^:\n]*:\s*',
+            # Bare label: 'Episode synopsis:' / 'Summary:' / 'Plot:'
+            r'^\s*(?:episode\s+)?(?:synopsis|summary|plot|overview)\s*:\s*',
             # "In/On (the) (latest) episode (of X / titled "X"),"
             r'^(?:in|on)\s+(?:the\s+|this\s+|a\s+)?(?:latest\s+|newest\s+|current\s+|recent\s+)?'
             r'(?:episode|installment|instalment|chapter|edition|entry|story)'
