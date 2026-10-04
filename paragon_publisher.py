@@ -4157,11 +4157,8 @@ class _GradInput(tk.Canvas):
         self._bw = bw
         self._radius = radius
         self._photo = None
-        # Keep the inner widget's own box, but recolor its border pure white
-        # (it used to be grey) so it reads as a clean white frame nested inside
-        # the gradient border.
-        kwargs['border_color'] = "#ffffff"
-        kwargs['border_width'] = 1
+        # Remove the inner widget's own border so only the gradient border shows.
+        kwargs['border_width'] = 0
         kwargs.setdefault('fg_color', ParagonTheme.BG_DARK)
         kwargs.setdefault('bg_color', ParagonTheme.BG_DARK)
         kwargs['corner_radius'] = max(0, radius - bw)
