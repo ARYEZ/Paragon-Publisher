@@ -13498,6 +13498,12 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ParagonButton(btnrow, text="📝 FIX PLOTS",
                      command=lambda: self._fix_plots(album),
                      width=150, height=42).pack(side="left", padx=6)
+        _artist_albums = (self.selected_artist or {}).get('albums', [])
+        if len(_artist_albums) > 1:
+            ParagonButton(btnrow, text="📚 FIX PLOTS (ALL)",
+                         command=lambda: self._fix_plots(
+                             sorted(_artist_albums, key=lambda a: (a.get('name') or '').lower())),
+                         width=180, height=42).pack(side="left", padx=6)
         ParagonButton(btnrow, text="🖼 SAVE COVER",
                      command=lambda: self._save_album_cover(album),
                      width=170, height=42,
@@ -13696,42 +13702,51 @@ class MusicLibraryDialog(ctk.CTkToplevel):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _fix_plots(self, album: Dict):
-        """Find a plot for each episode of an audio/radio drama (Wikipedia +
-        Internet Archive), let the user review, then write per-episode Kodi .nfo
-        files (<audiofile>.nfo with <episodedetails><plot>)."""
+    def _fix_plots(self, album):
+        """Find a plot for each episode of an audio/radio drama, let the user
+        review, then write per-episode Kodi .nfo files (<audiofile>.nfo with
+        <episodedetails><plot>). `album` may be a single album dict or a list of
+        album dicts — a list processes several albums at once, each album becoming
+        its own season (in the given order)."""
         audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
-        folder = album['path']
-        try:
-            files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
-                           if os.path.splitext(f)[1].lower() in audio_ext)
-        except Exception:
-            files = []
-        if not files:
-            messagebox.showinfo("No tracks", "No audio files found in this album folder.")
-            return
-        series = (self.selected_artist or {}).get('name') or album.get('name') or ""
+        album_list = [album] if isinstance(album, dict) else list(album)
+        multi = len(album_list) > 1
+        series = (self.selected_artist or {}).get('name') or \
+            (album_list[0].get('name') if album_list else "") or ""
 
-        # Build the episode list (title from tag, else the filename title segment)
+        # Build the episode list across all requested albums. Each album is a
+        # season (1-based, in the order given) so episode numbers don't collide.
         episodes = []
-        for idx, f in enumerate(files, 1):
+        for season, alb in enumerate(album_list, 1):
+            folder = alb.get('path')
             try:
-                tags = TagManager.read_tags(f)
+                files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                               if os.path.splitext(f)[1].lower() in audio_ext)
             except Exception:
-                tags = {}
-            title = (tags.get('title') or "").strip()
-            if not title:
-                base = os.path.splitext(os.path.basename(f))[0]
-                parts = base.split(" - ")
-                title = parts[-6].strip() if len(parts) >= 6 else base
-            track = str(tags.get('track') or "").strip()
-            try:
-                epnum = int(re.split(r'[^\d]', track)[0]) if track and track[0].isdigit() else idx
-            except Exception:
-                epnum = idx
-            episodes.append({'file': f, 'title': title, 'episode': epnum,
-                             'plot': '', 'source': '', 'box': None, 'src_lbl': None,
-                             'inc': None})
+                files = []
+            for idx, f in enumerate(files, 1):
+                try:
+                    tags = TagManager.read_tags(f)
+                except Exception:
+                    tags = {}
+                title = (tags.get('title') or "").strip()
+                if not title:
+                    base = os.path.splitext(os.path.basename(f))[0]
+                    parts = base.split(" - ")
+                    title = parts[-6].strip() if len(parts) >= 6 else base
+                track = str(tags.get('track') or "").strip()
+                try:
+                    epnum = int(re.split(r'[^\d]', track)[0]) if track and track[0].isdigit() else idx
+                except Exception:
+                    epnum = idx
+                episodes.append({'file': f, 'title': title, 'episode': epnum,
+                                 'season': (season if multi else 1),
+                                 'album': alb.get('name', ''),
+                                 'plot': '', 'source': '', 'box': None, 'src_lbl': None,
+                                 'inc': None})
+        if not episodes:
+            messagebox.showinfo("No tracks", "No audio files found in the selected album(s).")
+            return
 
         # ---- Review dialog ----
         dlg = ctk.CTkToplevel(self)
@@ -13761,7 +13776,10 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
         inner.pack(fill="both", expand=True, padx=2, pady=2)
         ParagonLabel(inner, text="FIX PLOTS", style="header").pack(anchor="w", padx=16, pady=(14, 2))
-        ParagonLabel(inner, text=f"{series} · {len(episodes)} episodes",
+        _subtitle = f"{series} · {len(episodes)} episodes"
+        if multi:
+            _subtitle += f" across {len(album_list)} albums (each = a season)"
+        ParagonLabel(inner, text=_subtitle,
                      style="muted").pack(anchor="w", padx=16, pady=(0, 6))
 
         # ---- Engine controls ----
@@ -13840,14 +13858,21 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         scroll = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY)
         scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
+        _cur_season = None
         for ep in episodes:
+            if multi and ep['season'] != _cur_season:
+                _cur_season = ep['season']
+                ParagonLabel(scroll, text=f"SEASON {ep['season']:02d} · {ep['album']}",
+                             style="header").pack(anchor="w", padx=8, pady=(10, 2))
             card = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
                                 border_color=ParagonTheme.BORDER_GOLD, border_width=1)
             card.pack(fill="x", padx=6, pady=6)
             top = ctk.CTkFrame(card, fg_color="transparent")
             top.pack(fill="x", padx=10, pady=(8, 2))
             ep['inc'] = ctk.BooleanVar(value=False)
-            ParagonGradientCheckbox(top, text=f"E{ep['episode']:02d} · {ep['title']}",
+            _lbl = (f"S{ep['season']:02d}E{ep['episode']:02d} · {ep['title']}" if multi
+                    else f"E{ep['episode']:02d} · {ep['title']}")
+            ParagonGradientCheckbox(top, text=_lbl,
                                     variable=ep['inc']).pack(side="left")
             ep['src_lbl'] = ParagonLabel(top, text="—", style="muted", anchor="e")
             ep['src_lbl'].pack(side="right")
@@ -14010,8 +14035,8 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     if not plot:
                         skipped += 1
                         continue
-                    self._write_episode_nfo(ep['file'], series, 1, ep['episode'],
-                                            ep['title'], plot)
+                    self._write_episode_nfo(ep['file'], series, ep.get('season', 1),
+                                            ep['episode'], ep['title'], plot)
                     written += 1
                 except Exception as e:
                     print(f"NFO write error: {e}")
