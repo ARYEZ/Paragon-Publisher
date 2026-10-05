@@ -14056,7 +14056,102 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         self._set_album_field(album, 'album')
 
     def _set_album_title(self, album: Dict):
-        self._set_album_field(album, 'title')
+        """Per-track: set each song's tag title from the title in its filename."""
+        seg = self._FIELD_SEG['title']
+        need = abs(seg)
+        audio_ext = {'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
+        folder = album['path']
+        try:
+            files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                           if os.path.splitext(f)[1].lower() in audio_ext)
+        except Exception:
+            files = []
+        if not files:
+            messagebox.showinfo("No tracks", "No audio files found in this album folder.")
+            return
+
+        rows = []  # (path, current_tag_title, filename_title)
+        for f in files:
+            base = os.path.splitext(os.path.basename(f))[0]
+            parts = base.split(" - ")
+            fn_title = parts[seg].strip() if len(parts) >= need else ""
+            try:
+                cur = (TagManager.read_tags(f).get('title') or "").strip()
+            except Exception:
+                cur = ""
+            rows.append((f, cur, fn_title))
+
+        usable = [r for r in rows if r[2]]
+        if not usable:
+            messagebox.showinfo(
+                "Can't read titles",
+                "Couldn't find a title segment in these filenames.\n\nExpected names "
+                "like:\n  Artist - Title - Album - Genre - Year - Format - Bitrate",
+                parent=self)
+            return
+        changes = [r for r in usable if r[2] != r[1]]
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Set Titles From Filenames")
+        dlg.geometry("640x560")
+        dlg.transient(self)
+        outer = ctk.CTkFrame(dlg, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+        outer.pack(fill="both", expand=True, padx=4, pady=4)
+        inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+        ParagonLabel(inner, text="SET TITLES FROM FILENAMES", style="header").pack(
+            anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text=f"{album['name']} · {len(changes)} of {len(usable)} "
+                     f"title(s) will change", style="muted").pack(anchor="w", padx=16, pady=(0, 8))
+
+        preview = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY,
+                                         border_color=ParagonTheme.BORDER_GOLD, border_width=1)
+        preview.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        for i, (f, cur, fn_title) in enumerate(rows, 1):
+            if not fn_title:
+                continue
+            line = ctk.CTkFrame(preview, fg_color="transparent")
+            line.pack(fill="x", padx=6, pady=1)
+            ParagonLabel(line, text=f"{i:02d}", style="muted", width=28, anchor="w").pack(side="left")
+            if fn_title != cur:
+                ParagonLabel(line, text=f'"{cur}"  →  "{fn_title}"',
+                             style="accent", anchor="w").pack(side="left")
+            else:
+                ParagonLabel(line, text=f'"{fn_title}"  (unchanged)',
+                             style="muted", anchor="w").pack(side="left")
+
+        def _apply():
+            tagged = errs = 0
+            for f, cur, fn_title in usable:
+                if not fn_title or fn_title == cur:
+                    continue
+                try:
+                    if TagManager.write_tags(f, {'title': fn_title}):
+                        tagged += 1
+                except Exception as e:
+                    errs += 1
+                    print(f"Set-title error on {f}: {e}")
+            dlg.destroy()
+            msg = f"Updated {tagged} title tag(s)."
+            if errs:
+                msg += f"\n{errs} error(s) — see console."
+            messagebox.showinfo("Done", msg)
+            try:
+                self._show_album_details(album)
+            except Exception:
+                pass
+
+        btns = ctk.CTkFrame(inner, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
+        ParagonSecondaryButton(btns, text="CANCEL", command=dlg.destroy, width=100).pack(side="left")
+        apply_btn = ParagonButton(btns, text="APPLY", command=_apply, width=150)
+        apply_btn.pack(side="right")
+        if not changes:
+            try:
+                apply_btn.configure(state="disabled")
+            except Exception:
+                pass
+        dlg.after(80, lambda: (dlg.lift(), dlg.grab_set()))
 
     def _set_album_field(self, album: Dict, field: str):
         """Find/replace one value for <field> (genre/album/title) across the album
