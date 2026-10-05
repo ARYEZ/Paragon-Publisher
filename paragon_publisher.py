@@ -2660,21 +2660,6 @@ class PlotSummarizer:
         return PlotSummarizer._clean_summary(data.get("response") or "", series)
 
     @staticmethod
-    def openai(transcript, series, title, base_url, api_key, model="gpt-4o-mini"):
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": PlotSummarizer._prompt(transcript, series, title)}],
-            "temperature": 0.4,
-        }).encode("utf-8")
-        req = urllib.request.Request(base_url.rstrip("/") + "/chat/completions", data=body,
-                                     headers={"Content-Type": "application/json",
-                                              "Authorization": f"Bearer {api_key}"})
-        with urllib.request.urlopen(req, timeout=180) as r:
-            data = json.loads(r.read().decode("utf-8", "replace"))
-        return PlotSummarizer._clean_summary(
-            data["choices"][0]["message"]["content"], series)
-
-    @staticmethod
     def extractive(transcript, max_sentences=4):
         sents = re.split(r'(?<=[.!?])\s+', (transcript or "").strip())
         sents = [s for s in sents if len(s.split()) > 3]
@@ -13835,8 +13820,11 @@ class MusicLibraryDialog(ctk.CTkToplevel):
 
         row1b = ctk.CTkFrame(ctrl, fg_color="transparent"); row1b.pack(fill="x", padx=10, pady=(0, 2))
         ParagonLabel(row1b, text="Summarizer", style="muted", width=78, anchor="w").pack(side="left")
-        summ_var = ctk.StringVar(value=pconfig_get("plot_summarizer", "Ollama"))
-        ParagonOptionMenu(row1b, values=["Ollama", "Cloud API", "Extractive"], variable=summ_var,
+        _summ0 = pconfig_get("plot_summarizer", "Ollama")
+        if _summ0 not in ("Ollama", "Extractive"):
+            _summ0 = "Ollama"
+        summ_var = ctk.StringVar(value=_summ0)
+        ParagonOptionMenu(row1b, values=["Ollama", "Extractive"], variable=summ_var,
                           width=150).pack(side="left", padx=(4, 0))
         skim_var = ctk.BooleanVar(value=bool(pconfig_get("plot_skim", False)))
         ParagonGradientCheckbox(row1b, text="Skim 30s/min (≈2× faster)",
@@ -13852,18 +13840,6 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ollama_model_e.pack(side="left", padx=(0, 8))
         ParagonButton(row2, text="TEST", width=80, height=36,
                       command=lambda: _test_ollama()).pack(side="left")
-
-        row3 = ctk.CTkFrame(ctrl, fg_color="transparent"); row3.pack(fill="x", padx=10, pady=(0, 8))
-        ParagonLabel(row3, text="Cloud", style="muted", width=70, anchor="w").pack(side="left")
-        cloud_base_e = ParagonEntry(row3, width=220, height=36)
-        cloud_base_e.insert(0, pconfig_get("plot_cloud_base", "https://api.openai.com/v1"))
-        cloud_base_e.pack(side="left", padx=(4, 8))
-        cloud_key_e = ParagonEntry(row3, width=180, height=36, show="•")
-        cloud_key_e.insert(0, pconfig_get("plot_cloud_key", ""))
-        cloud_key_e.pack(side="left", padx=(0, 8))
-        cloud_model_e = ParagonEntry(row3, width=150, height=36)
-        cloud_model_e.insert(0, pconfig_get("plot_cloud_model", "gpt-4o-mini"))
-        cloud_model_e.pack(side="left")
 
         prog = ParagonLabel(inner, text="Pick a source and press Generate.", style="muted")
         prog.pack(anchor="w", padx=16, pady=(2, 2))
@@ -13931,7 +13907,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
 
         gen_state = {"running": False}
 
-        def _run(source, wmodel, maxsec, summ, ourl, omodel, cbase, ckey, cmodel, beam, skim):
+        def _run(source, wmodel, maxsec, summ, ourl, omodel, beam, skim):
             found = 0
             n = len(episodes)
             for i, ep in enumerate(episodes, 1):
@@ -13969,9 +13945,6 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                             if summ == "Ollama":
                                 plot = PlotSummarizer.ollama(transcript, series, ep['title'], ourl, omodel)
                                 src = "Whisper + Ollama"
-                            elif summ == "Cloud API":
-                                plot = PlotSummarizer.openai(transcript, series, ep['title'], cbase, ckey, cmodel)
-                                src = "Whisper + Cloud"
                             else:
                                 plot = PlotSummarizer.extractive(transcript)
                                 src = "Whisper (extractive)"
@@ -14042,9 +14015,6 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                         plot_summarizer=summ_var.get(), plot_max_minutes=maxmin_e.get().strip(),
                         plot_ollama_url=ollama_url_e.get().strip(),
                         plot_ollama_model=ollama_model_e.get().strip(),
-                        plot_cloud_base=cloud_base_e.get().strip(),
-                        plot_cloud_key=cloud_key_e.get().strip(),
-                        plot_cloud_model=cloud_model_e.get().strip(),
                         plot_skim=bool(skim_var.get()))
             if source == "Transcribe" and not AudioTranscriber.available():
                 messagebox.showwarning(
@@ -14058,9 +14028,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             threading.Thread(target=_run, args=(
                 source, wmodel_var.get(), maxsec, summ_var.get(),
                 ollama_url_e.get().strip() or "http://localhost:11434",
-                ollama_model_e.get().strip() or "llama3.1",
-                cloud_base_e.get().strip() or "https://api.openai.com/v1",
-                cloud_key_e.get().strip(), cloud_model_e.get().strip() or "gpt-4o-mini", beam,
+                ollama_model_e.get().strip() or "llama3.1", beam,
                 bool(skim_var.get())),
                 daemon=True).start()
 
