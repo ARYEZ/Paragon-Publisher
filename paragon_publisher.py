@@ -2485,7 +2485,34 @@ class AudioTranscriber:
             return False
 
     @staticmethod
+    def _ensure_cuda_libs():
+        """On Windows the pip CUDA wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12,
+        …) drop their DLLs under site-packages/nvidia/<lib>/bin, which Windows does
+        NOT search by default — so CTranslate2 fails with 'cublas64_12.dll is not
+        found'. Register those folders on the DLL search path (and PATH)."""
+        import sys, os, glob
+        if not sys.platform.startswith("win"):
+            return
+        roots = []
+        try:
+            import nvidia  # namespace package the cu12 wheels install into
+            roots = [p for p in getattr(nvidia, "__path__", []) if p]
+        except Exception:
+            roots = []
+        for root in roots:
+            for bindir in glob.glob(os.path.join(root, "*", "bin")):
+                if not os.path.isdir(bindir):
+                    continue
+                try:
+                    os.add_dll_directory(bindir)
+                except Exception:
+                    pass
+                if bindir not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
+
+    @staticmethod
     def _get_model(size):
+        AudioTranscriber._ensure_cuda_libs()
         from faster_whisper import WhisperModel
         if AudioTranscriber._model is None or AudioTranscriber._model_size != size:
             # int8 keeps it light on CPU; device="auto" uses CUDA when present.
