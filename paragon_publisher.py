@@ -13858,27 +13858,40 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         scroll = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY)
         scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
+        # Use lightweight tk widgets per episode (plain Frame + Text) instead of
+        # CTkFrame + CTkTextbox. With many episodes (a big album, or FIX PLOTS ALL
+        # across a whole series) the CTk draw engine recurses on every card and
+        # overflows Python's stack (RecursionError in the scrollbar draw). Plain
+        # tk widgets don't touch that draw path, so the list scales to hundreds.
+        import sys as _sys
+        try:
+            _sys.setrecursionlimit(max(_sys.getrecursionlimit(), 5000))
+        except Exception:
+            pass
         _cur_season = None
         for ep in episodes:
             if multi and ep['season'] != _cur_season:
                 _cur_season = ep['season']
                 ParagonLabel(scroll, text=f"SEASON {ep['season']:02d} · {ep['album']}",
                              style="header").pack(anchor="w", padx=8, pady=(10, 2))
-            card = ctk.CTkFrame(scroll, fg_color=ParagonTheme.BG_DARK, corner_radius=8,
-                                border_color=ParagonTheme.BORDER_GOLD, border_width=1)
-            card.pack(fill="x", padx=6, pady=6)
-            top = ctk.CTkFrame(card, fg_color="transparent")
-            top.pack(fill="x", padx=10, pady=(8, 2))
+            card = tk.Frame(scroll, bg=ParagonTheme.BG_DARK,
+                            highlightbackground=ParagonTheme.BORDER_GOLD,
+                            highlightcolor=ParagonTheme.BORDER_GOLD, highlightthickness=1, bd=0)
+            card.pack(fill="x", padx=6, pady=5)
+            top = tk.Frame(card, bg=ParagonTheme.BG_DARK)
+            top.pack(fill="x", padx=10, pady=(6, 2))
             ep['inc'] = ctk.BooleanVar(value=False)
             _lbl = (f"S{ep['season']:02d}E{ep['episode']:02d} · {ep['title']}" if multi
                     else f"E{ep['episode']:02d} · {ep['title']}")
             ParagonGradientCheckbox(top, text=_lbl,
                                     variable=ep['inc']).pack(side="left")
-            ep['src_lbl'] = ParagonLabel(top, text="—", style="muted", anchor="e")
+            ep['src_lbl'] = tk.Label(top, text="—", bg=ParagonTheme.BG_DARK,
+                                     fg=ParagonTheme.TEXT_MUTED, anchor="e")
             ep['src_lbl'].pack(side="right")
-            ep['box'] = ctk.CTkTextbox(card, height=90, fg_color=ParagonTheme.BG_TERTIARY,
-                                       border_width=0)
-            ep['box'].pack(fill="x", padx=10, pady=(2, 10))
+            ep['box'] = tk.Text(card, height=4, bg=ParagonTheme.BG_TERTIARY, fg="#ffffff",
+                                insertbackground="#ffffff", relief="flat", bd=0, wrap="word",
+                                font=("Segoe UI", 11), highlightthickness=0, padx=8, pady=6)
+            ep['box'].pack(fill="x", padx=10, pady=(2, 8))
 
         def _apply_row(ep, text, src, check=None):
             try:
