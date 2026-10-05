@@ -14079,7 +14079,17 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 cur = (TagManager.read_tags(f).get('title') or "").strip()
             except Exception:
                 cur = ""
-            rows.append((f, cur, fn_title))
+            # Current <title> in an existing sidecar .nfo, if any (None = no .nfo)
+            nfo_title = None
+            nfo_path = os.path.splitext(f)[0] + ".nfo"
+            if os.path.exists(nfo_path):
+                try:
+                    with open(nfo_path, 'r', encoding='utf-8') as fh:
+                        m = re.search(r'<title>(.*?)</title>', fh.read(), flags=re.DOTALL)
+                    nfo_title = (m.group(1).strip() if m else "")
+                except Exception:
+                    nfo_title = ""
+            rows.append((f, cur, fn_title, nfo_title))
 
         usable = [r for r in rows if r[2]]
         if not usable:
@@ -14089,7 +14099,10 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 "like:\n  Artist - Title - Album - Genre - Year - Format - Bitrate",
                 parent=self)
             return
-        changes = [r for r in usable if r[2] != r[1]]
+        # A row "changes" if the tag differs OR an existing .nfo's title differs.
+        import xml.sax.saxutils as _sx0
+        changes = [r for r in usable
+                   if r[1] != r[2] or (r[3] is not None and _sx0.unescape(r[3]) != r[2])]
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Set Titles From Filenames")
@@ -14102,37 +14115,62 @@ class MusicLibraryDialog(ctk.CTkToplevel):
         ParagonLabel(inner, text="SET TITLES FROM FILENAMES", style="header").pack(
             anchor="w", padx=16, pady=(14, 2))
         ParagonLabel(inner, text=f"{album['name']} · {len(changes)} of {len(usable)} "
-                     f"title(s) will change", style="muted").pack(anchor="w", padx=16, pady=(0, 8))
+                     f"track(s) will change (tags + any .nfo)", style="muted").pack(
+                     anchor="w", padx=16, pady=(0, 8))
 
         preview = ctk.CTkScrollableFrame(inner, fg_color=ParagonTheme.BG_SECONDARY,
                                          border_color=ParagonTheme.BORDER_GOLD, border_width=1)
         preview.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        for i, (f, cur, fn_title) in enumerate(rows, 1):
+        for i, (f, cur, fn_title, nfo_title) in enumerate(rows, 1):
             if not fn_title:
                 continue
             line = ctk.CTkFrame(preview, fg_color="transparent")
             line.pack(fill="x", padx=6, pady=1)
             ParagonLabel(line, text=f"{i:02d}", style="muted", width=28, anchor="w").pack(side="left")
-            if fn_title != cur:
-                ParagonLabel(line, text=f'"{cur}"  →  "{fn_title}"',
+            nfo_differs = nfo_title is not None and _sx0.unescape(nfo_title) != fn_title
+            if fn_title != cur or nfo_differs:
+                tag = ' [.nfo]' if nfo_title is not None else ''
+                ParagonLabel(line, text=f'"{cur}"  →  "{fn_title}"{tag}',
                              style="accent", anchor="w").pack(side="left")
             else:
                 ParagonLabel(line, text=f'"{fn_title}"  (unchanged)',
                              style="muted", anchor="w").pack(side="left")
 
         def _apply():
-            tagged = errs = 0
-            for f, cur, fn_title in usable:
-                if not fn_title or fn_title == cur:
+            import xml.sax.saxutils as _sx
+            tagged = nfos = errs = 0
+            for f, cur, fn_title, _nfo_title in usable:
+                if not fn_title:
                     continue
-                try:
-                    if TagManager.write_tags(f, {'title': fn_title}):
-                        tagged += 1
-                except Exception as e:
-                    errs += 1
-                    print(f"Set-title error on {f}: {e}")
+                # Correct the MP3 tag title
+                if fn_title != cur:
+                    try:
+                        if TagManager.write_tags(f, {'title': fn_title}):
+                            tagged += 1
+                    except Exception as e:
+                        errs += 1
+                        print(f"Set-title error on {f}: {e}")
+                # Correct the <title> in an existing sidecar .nfo (Fix Plots output)
+                nfo_path = os.path.splitext(f)[0] + ".nfo"
+                if os.path.exists(nfo_path):
+                    try:
+                        with open(nfo_path, 'r', encoding='utf-8') as fh:
+                            content = fh.read()
+                        repl = f'<title>{_sx.escape(fn_title)}</title>'
+                        new_content, n = re.subn(r'<title>.*?</title>', lambda m: repl,
+                                                 content, count=1, flags=re.DOTALL)
+                        if n and new_content != content:
+                            with open(nfo_path, 'w', encoding='utf-8') as fh:
+                                fh.write(new_content)
+                            nfos += 1
+                    except Exception as e:
+                        errs += 1
+                        print(f"NFO title update error on {nfo_path}: {e}")
             dlg.destroy()
-            msg = f"Updated {tagged} title tag(s)."
+            msg = f"Updated {tagged} title tag(s)"
+            if nfos:
+                msg += f" and {nfos} .nfo file(s)"
+            msg += "."
             if errs:
                 msg += f"\n{errs} error(s) — see console."
             messagebox.showinfo("Done", msg)
