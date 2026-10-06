@@ -2834,16 +2834,25 @@ class TTSNarrator:
                 pass
 
     @staticmethod
-    def synthesize(text, speaker_wav=None, language="en", out_path=None, speaker=None):
+    def synthesize(text, speaker_wav=None, language="en", out_path=None, speaker=None,
+                   temperature=None, speed=None, split=None):
         """Render `text` to a wav via the persistent worker (model stays warm).
         Use `speaker` for a built-in XTTS voice, or `speaker_wav` to clone a
-        sample. Raises RuntimeError on failure."""
+        sample. temperature/speed/split are optional XTTS quality knobs. Raises
+        RuntimeError on failure."""
         import tempfile
         if not out_path:
             out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
-        req = json.dumps({"text": text or "", "speaker_wav": speaker_wav or "",
-                          "speaker": speaker or "",
-                          "language": language or "en", "out": out_path})
+        payload = {"text": text or "", "speaker_wav": speaker_wav or "",
+                   "speaker": speaker or "", "language": language or "en",
+                   "out": out_path}
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if speed is not None:
+            payload["speed"] = speed
+        if split is not None:
+            payload["split"] = bool(split)
+        req = json.dumps(payload)
         with TTSNarrator._proc_lock:
             data = None
             for attempt in (1, 2):  # restart the worker once if the pipe is dead
@@ -17637,6 +17646,21 @@ class NarrationDialog(ctk.CTkToplevel):
         ParagonOptionMenu(r2, values=TTSNarrator.LANGUAGES, variable=self.lang_var,
                           width=110).pack(side="left", padx=(4, 0))
 
+        # Quality row: expressiveness (temperature), speed, split long text
+        self.EXPR_TEMP = {"Stable": 0.3, "Balanced": 0.65, "Expressive": 0.85}
+        rQ = ctk.CTkFrame(inner, fg_color="transparent"); rQ.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(rQ, text="Quality", style="muted", width=110, anchor="w").pack(side="left")
+        self.expr_var = ctk.StringVar(value=pconfig_get("tts_expr", "Balanced"))
+        ParagonOptionMenu(rQ, values=["Stable", "Balanced", "Expressive"],
+                          variable=self.expr_var, width=130).pack(side="left", padx=(4, 10))
+        ParagonLabel(rQ, text="Speed", style="muted", anchor="w").pack(side="left")
+        self.speed_var = ctk.StringVar(value=str(pconfig_get("tts_speed", "1.0")))
+        ParagonOptionMenu(rQ, values=["0.8", "0.9", "1.0", "1.1", "1.2"],
+                          variable=self.speed_var, width=80).pack(side="left", padx=(4, 10))
+        self.split_var = ctk.BooleanVar(value=bool(pconfig_get("tts_split", True)))
+        ParagonGradientCheckbox(rQ, text="Split long text",
+                                variable=self.split_var).pack(side="left", padx=(6, 0))
+
         # Text box
         ParagonLabel(inner, text="Text", style="muted").pack(anchor="w", padx=16, pady=(8, 2))
         self.text = ctk.CTkTextbox(inner, height=220, fg_color=ParagonTheme.BG_TERTIARY,
@@ -17757,8 +17781,16 @@ class NarrationDialog(ctk.CTkToplevel):
                     "Pick a built-in Voice, or choose 'Clone from sample' and Browse "
                     "to a voice clip.", parent=self)
                 return
+        temperature = self.EXPR_TEMP.get(self.expr_var.get(), 0.65)
+        try:
+            speed = float(self.speed_var.get())
+        except Exception:
+            speed = 1.0
+        split = bool(self.split_var.get())
         pconfig_set(tts_speaker_wav=self.voice_e.get().strip(),
-                    tts_language=lang, tts_voice=mode)
+                    tts_language=lang, tts_voice=mode,
+                    tts_expr=self.expr_var.get(), tts_speed=self.speed_var.get(),
+                    tts_split=split)
         self._busy = True
         try:
             self.speak_btn.configure(state="disabled")
@@ -17773,7 +17805,9 @@ class NarrationDialog(ctk.CTkToplevel):
             out = None
             try:
                 out = TTSNarrator.synthesize(text, speaker_wav=speaker_wav,
-                                             language=lang, speaker=builtin)
+                                             language=lang, speaker=builtin,
+                                             temperature=temperature, speed=speed,
+                                             split=split)
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
 

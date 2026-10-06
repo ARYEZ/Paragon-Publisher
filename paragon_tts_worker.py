@@ -147,7 +147,19 @@ def serve(model_name=XTTS_MODEL):
                 kwargs["speaker_wav"] = spk_wav
             else:
                 raise ValueError("no built-in voice selected and no valid sample")
-            model.tts_to_file(**kwargs)
+            # Optional quality knobs (XTTS inference params)
+            extra = {}
+            if req.get("temperature") is not None:
+                extra["temperature"] = float(req["temperature"])
+            if req.get("speed") is not None:
+                extra["speed"] = float(req["speed"])
+            if req.get("split") is not None:
+                extra["enable_text_splitting"] = bool(req["split"])
+            try:
+                model.tts_to_file(**kwargs, **extra)
+            except TypeError:
+                # Older coqui-tts may not accept some kwargs — fall back to defaults.
+                model.tts_to_file(**kwargs)
             respond({"ok": True, "device": dev, "out": out})
         except Exception as e:
             respond({"ok": False, "error": f"{type(e).__name__}: {e}"})
