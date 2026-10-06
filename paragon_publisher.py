@@ -2702,6 +2702,25 @@ class TTSNarrator:
     _proc_lock = threading.Lock()
     LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
                  "cs", "ar", "zh-cn", "ja", "hu", "ko", "hi"]
+    # XTTS-v2's built-in studio voices. Used as the immediate dropdown list; the
+    # real list from the worker's ready message overwrites the cached copy.
+    DEFAULT_SPEAKERS = [
+        "Claribel Dervla", "Daisy Studious", "Gracie Wise", "Tammie Ema",
+        "Alison Dietlinde", "Ana Florence", "Annmarie Nele", "Asya Anara",
+        "Brenda Stern", "Gitta Nikolina", "Henriette Usha", "Sofia Hellen",
+        "Tammy Grit", "Tanja Adelina", "Vjollca Johnnie", "Andrew Chipper",
+        "Badr Odhiambo", "Dionisio Schuyler", "Royston Min", "Viktor Eka",
+        "Abrahan Mack", "Adde Michal", "Baldur Sanjin", "Craig Gutsy",
+        "Damien Black", "Gilberto Mathias", "Ilkin Urrbauer", "Kazuhiko Atallah",
+        "Ludvig Milivoj", "Suad Qasim", "Torcull Diarmuid", "Viktor Menelaos",
+        "Zacharie Aimilios", "Nova Hogarth", "Maja Ruoho", "Uta Obando",
+        "Lidiya Szekeres", "Chandra MacFarland", "Szofi Granger",
+        "Camilla Holmström", "Lilya Stainthorpe", "Zofija Kendrick",
+        "Narelle Moon", "Barbora MacLean", "Alexandra Hisakawa", "Alma María",
+        "Rosemary Okafor", "Ige Behringer", "Filip Traverse", "Damjan Chapman",
+        "Wulf Carlevaro", "Aaron Dreschner", "Kumar Dahl", "Eugenio Mataracı",
+        "Ferran Simen", "Xavier Hayasaka", "Luis Moray", "Marcos Rudaski",
+    ]
 
     @staticmethod
     def _python():
@@ -2790,6 +2809,12 @@ class TTSNarrator:
         TTSNarrator._proc = proc
         TTSNarrator._proc_py = py
         TTSNarrator._device = data.get("device")
+        spk = data.get("speakers")
+        if spk:
+            try:
+                pconfig_set(tts_speakers=list(spk))
+            except Exception:
+                pass
         return proc
 
     @staticmethod
@@ -2809,13 +2834,15 @@ class TTSNarrator:
                 pass
 
     @staticmethod
-    def synthesize(text, speaker_wav, language="en", out_path=None):
-        """Render `text` to a wav in the cloned voice via the persistent worker
-        (model stays warm across calls). Raises RuntimeError on failure."""
+    def synthesize(text, speaker_wav=None, language="en", out_path=None, speaker=None):
+        """Render `text` to a wav via the persistent worker (model stays warm).
+        Use `speaker` for a built-in XTTS voice, or `speaker_wav` to clone a
+        sample. Raises RuntimeError on failure."""
         import tempfile
         if not out_path:
             out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
-        req = json.dumps({"text": text or "", "speaker": speaker_wav,
+        req = json.dumps({"text": text or "", "speaker_wav": speaker_wav or "",
+                          "speaker": speaker or "",
                           "language": language or "en", "out": out_path})
         with TTSNarrator._proc_lock:
             data = None
@@ -17584,7 +17611,17 @@ class NarrationDialog(ctk.CTkToplevel):
         ParagonButton(r0, text="TEST", width=80, height=38,
                       command=self._test_env).pack(side="left")
 
-        # Voice sample row
+        # Voice selector: a built-in XTTS voice, or "Clone from sample"
+        self.CLONE_LABEL = "Clone from sample"
+        speakers = pconfig_get("tts_speakers", None) or TTSNarrator.DEFAULT_SPEAKERS
+        rV = ctk.CTkFrame(inner, fg_color="transparent"); rV.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(rV, text="Voice", style="muted", width=110, anchor="w").pack(side="left")
+        self.voice_var = ctk.StringVar(value=pconfig_get("tts_voice", speakers[0] if speakers else self.CLONE_LABEL))
+        ParagonOptionMenu(rV, values=[self.CLONE_LABEL] + list(speakers),
+                          variable=self.voice_var, width=260,
+                          command=self._on_voice_mode).pack(side="left", padx=(4, 0))
+
+        # Voice sample row (only used when "Clone from sample" is selected)
         r1 = ctk.CTkFrame(inner, fg_color="transparent"); r1.pack(fill="x", padx=16, pady=4)
         ParagonLabel(r1, text="Voice sample", style="muted", width=110, anchor="w").pack(side="left")
         self.voice_e = ParagonEntry(r1, height=38)
@@ -17621,6 +17658,11 @@ class NarrationDialog(ctk.CTkToplevel):
         if not TTSNarrator.available():
             self.status.configure(text="⚠ Set 'TTS Python' to your 3.11–3.13 env — press TEST to verify.")
 
+    def _on_voice_mode(self, value=None):
+        cloning = (self.voice_var.get() == self.CLONE_LABEL)
+        self.status.configure(
+            text="" if cloning else f"Built-in voice: {self.voice_var.get()}")
+
     def _browse_voice(self):
         path = filedialog.askopenfilename(
             title="Select a voice sample (6+ seconds of clean speech)",
@@ -17629,6 +17671,7 @@ class NarrationDialog(ctk.CTkToplevel):
         if path:
             self.voice_e.delete(0, "end")
             self.voice_e.insert(0, path)
+            self.voice_var.set(self.CLONE_LABEL)
 
     def _browse_python(self):
         path = filedialog.askopenfilename(
@@ -17699,16 +17742,23 @@ class NarrationDialog(ctk.CTkToplevel):
                 parent=self)
             return
         text = self.text.get("1.0", "end").strip()
-        speaker = self.voice_e.get().strip()
         lang = self.lang_var.get().strip() or "en"
+        mode = self.voice_var.get()
         if not text:
             messagebox.showwarning("No text", "Type some text to narrate.", parent=self)
             return
-        if not speaker or not os.path.isfile(speaker):
-            messagebox.showwarning("No voice sample",
-                                   "Pick a voice sample file to clone (Browse).", parent=self)
-            return
-        pconfig_set(tts_speaker_wav=speaker, tts_language=lang)
+        builtin = "" if mode == self.CLONE_LABEL else mode
+        speaker_wav = ""
+        if not builtin:
+            speaker_wav = self.voice_e.get().strip()
+            if not speaker_wav or not os.path.isfile(speaker_wav):
+                messagebox.showwarning(
+                    "No voice selected",
+                    "Pick a built-in Voice, or choose 'Clone from sample' and Browse "
+                    "to a voice clip.", parent=self)
+                return
+        pconfig_set(tts_speaker_wav=self.voice_e.get().strip(),
+                    tts_language=lang, tts_voice=mode)
         self._busy = True
         try:
             self.speak_btn.configure(state="disabled")
@@ -17722,7 +17772,8 @@ class NarrationDialog(ctk.CTkToplevel):
             err = None
             out = None
             try:
-                out = TTSNarrator.synthesize(text, speaker, lang)
+                out = TTSNarrator.synthesize(text, speaker_wav=speaker_wav,
+                                             language=lang, speaker=builtin)
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
 

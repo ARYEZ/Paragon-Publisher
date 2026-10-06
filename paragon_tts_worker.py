@@ -63,6 +63,20 @@ def _allowlist_xtts():
         pass
 
 
+def _builtin_speakers(model):
+    """Return XTTS's built-in (studio) speaker names, or [] if unavailable."""
+    try:
+        spk = getattr(model, "speakers", None)
+        if spk:
+            return list(spk)
+    except Exception:
+        pass
+    try:
+        return list(model.synthesizer.tts_model.speaker_manager.speaker_names)
+    except Exception:
+        return []
+
+
 def serve(model_name=XTTS_MODEL):
     """Persistent mode: load XTTS once, then read one JSON request per line from
     stdin and reply with one JSON line on stdout. All library chatter is routed
@@ -103,7 +117,7 @@ def serve(model_name=XTTS_MODEL):
         respond({"ready": False, "error": f"{type(e).__name__}: {e}"})
         return 1
 
-    respond({"ready": True, "device": dev})
+    respond({"ready": True, "device": dev, "speakers": _builtin_speakers(model)})
 
     for line in sys.stdin:
         line = line.strip()
@@ -118,16 +132,22 @@ def serve(model_name=XTTS_MODEL):
             break
         try:
             text = (req.get("text") or "").strip()
-            speaker = req.get("speaker") or ""
+            builtin = (req.get("speaker") or "").strip()      # built-in voice name
+            spk_wav = (req.get("speaker_wav") or "").strip()  # clone reference clip
             out = req.get("out") or ""
             lang = req.get("language") or "en"
             if not text:
                 raise ValueError("empty text")
-            if not os.path.isfile(speaker):
-                raise ValueError(f"speaker file not found: {speaker}")
             if not out:
                 raise ValueError("no output path")
-            model.tts_to_file(text=text, speaker_wav=speaker, language=lang, file_path=out)
+            kwargs = {"text": text, "language": lang, "file_path": out}
+            if builtin:
+                kwargs["speaker"] = builtin
+            elif os.path.isfile(spk_wav):
+                kwargs["speaker_wav"] = spk_wav
+            else:
+                raise ValueError("no built-in voice selected and no valid sample")
+            model.tts_to_file(**kwargs)
             respond({"ok": True, "device": dev, "out": out})
         except Exception as e:
             respond({"ok": False, "error": f"{type(e).__name__}: {e}"})
