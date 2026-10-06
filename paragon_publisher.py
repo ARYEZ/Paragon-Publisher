@@ -18001,6 +18001,22 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         ParagonOptionMenu(rs, values=["tiny.en", "base.en", "small.en", "medium.en"],
                           variable=self.whisper_var, width=120).pack(side="left", padx=(4, 0))
 
+        # Voice row: the agent's speaking voice (default, a built-in, or a clone)
+        self.CLONE_LABEL = "Clone from sample"
+        self.DEFAULT_LABEL = "Default voice"
+        rv = ctk.CTkFrame(inner, fg_color="transparent"); rv.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(rv, text="Voice", style="muted", width=90, anchor="w").pack(side="left")
+        self.voice_var = ctk.StringVar(value=pconfig_get("agent_voice", self.DEFAULT_LABEL))
+        opts = self._agent_voice_options()
+        if self.voice_var.get() not in opts:
+            self.voice_var.set(opts[0])
+        ParagonOptionMenu(rv, values=opts, variable=self.voice_var, width=200).pack(side="left", padx=(4, 8))
+        self.sample_e = ParagonEntry(rv, height=36)
+        self.sample_e.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.sample_e.insert(0, pconfig_get("agent_speaker_wav", pconfig_get("tts_speaker_wav", "")))
+        ParagonButton(rv, text="BROWSE", width=90, height=36,
+                      command=self._browse_sample).pack(side="left")
+
         # System prompt
         ParagonLabel(inner, text="System prompt", style="muted").pack(anchor="w", padx=16, pady=(6, 2))
         self.sys_e = ctk.CTkTextbox(inner, height=56, fg_color=ParagonTheme.BG_TERTIARY, border_width=0)
@@ -18033,6 +18049,25 @@ class VoiceAgentDialog(ctk.CTkToplevel):
             missing.append("TTS Python (voice) — set it in Narration")
         if missing:
             self.status.configure(text="⚠ Missing: " + ", ".join(missing))
+
+    def _engine(self):
+        return "chatterbox" if (pconfig_get("tts_engine", "Chatterbox") or "").lower() == "chatterbox" else "xtts"
+
+    def _agent_voice_options(self):
+        if self._engine() == "chatterbox":
+            return [self.DEFAULT_LABEL, self.CLONE_LABEL]
+        speakers = pconfig_get("tts_speakers", None) or TTSNarrator.DEFAULT_SPEAKERS
+        return [self.CLONE_LABEL] + list(speakers)
+
+    def _browse_sample(self):
+        path = filedialog.askopenfilename(
+            title="Select a voice sample to clone (6+ seconds of clean speech)",
+            filetypes=[("Audio", "*.wav *.mp3 *.flac *.m4a *.ogg"), ("All files", "*.*")],
+            parent=self)
+        if path:
+            self.sample_e.delete(0, "end")
+            self.sample_e.insert(0, path)
+            self.voice_var.set(self.CLONE_LABEL)
 
     def _append(self, who, text):
         try:
@@ -18111,14 +18146,37 @@ class VoiceAgentDialog(ctk.CTkToplevel):
             self.talk_btn.configure(state="disabled")
         except Exception:
             pass
-        self._set_status("Transcribing…")
         model = self.model_e.get().strip() or "llama3.1"
         url = pconfig_get("plot_ollama_url", "http://localhost:11434")
         wmodel = self.whisper_var.get()
         sys_prompt = self.sys_e.get("1.0", "end").strip() or self.DEFAULT_SYSTEM
         self.messages[0]["content"] = sys_prompt
-        engine = "chatterbox" if (pconfig_get("tts_engine", "Chatterbox") or "").lower() == "chatterbox" else "xtts"
-        pconfig_set(agent_model=model, agent_whisper=wmodel, agent_system=sys_prompt)
+        engine = self._engine()
+
+        # Resolve the agent's voice
+        mode = self.voice_var.get()
+        builtin = ""
+        speaker_wav = ""
+        if mode == self.CLONE_LABEL:
+            speaker_wav = self.sample_e.get().strip()
+            if not speaker_wav or not os.path.isfile(speaker_wav):
+                self._busy = False
+                try:
+                    self.talk_btn.configure(state="normal")
+                except Exception:
+                    pass
+                messagebox.showwarning(
+                    "No voice sample",
+                    "Choose 'Clone from sample' and Browse to a voice clip, or pick "
+                    "the default/built-in voice.", parent=self)
+                return
+        elif mode != self.DEFAULT_LABEL:
+            builtin = mode   # a named XTTS studio voice
+        exaggeration = 0.5 if engine == "chatterbox" else None
+
+        self._set_status("Transcribing…")
+        pconfig_set(agent_model=model, agent_whisper=wmodel, agent_system=sys_prompt,
+                    agent_voice=mode, agent_speaker_wav=self.sample_e.get().strip())
 
         def run():
             err = None
@@ -18135,7 +18193,9 @@ class VoiceAgentDialog(ctk.CTkToplevel):
                 self.messages.append({"role": "assistant", "content": reply})
                 self.after(0, lambda: (self._append("Paragon", reply), self._set_status("Speaking…")))
                 out = os.path.join(__import__("tempfile").gettempdir(), "paragon_agent_out.wav")
-                TTSNarrator.synthesize(reply, out_path=out, engine=engine)
+                TTSNarrator.synthesize(reply, out_path=out, engine=engine,
+                                       speaker=builtin, speaker_wav=speaker_wav,
+                                       exaggeration=exaggeration)
                 _play_wav_async(out)
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
