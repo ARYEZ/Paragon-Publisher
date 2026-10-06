@@ -15,6 +15,7 @@ Features:
 """
 
 import os
+import sys
 import re
 import json
 import io
@@ -2685,6 +2686,92 @@ class PlotSummarizer:
             return True, f"✓ Ollama is running and '{model}' is available.\n\nInstalled: {', '.join(names)}"
         return False, (f"Ollama is running, but '{model}' isn't installed.\n\n"
                        f"Installed: {', '.join(names)}\n\nPull it with:\n    ollama pull {model}")
+
+
+class TTSNarrator:
+    """Local text-to-speech with voice cloning via Coqui XTTS-v2 (optional
+    dependency — the model downloads on first use and runs entirely on the
+    user's machine; it uses CUDA when present). Give it a short reference clip
+    of a voice and it reads your text in that voice."""
+    _model = None
+    _device = None
+    XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+    LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
+                 "cs", "ar", "zh-cn", "ja", "hu", "ko", "hi"]
+
+    @staticmethod
+    def available():
+        try:
+            import TTS  # noqa: F401  (coqui-tts / TTS)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _get_model():
+        if TTSNarrator._model is None:
+            # Reuse the CUDA DLL shim so the GPU is found on Windows.
+            try:
+                AudioTranscriber._ensure_cuda_libs()
+            except Exception:
+                pass
+            from TTS.api import TTS as _TTS
+            try:
+                import torch
+                dev = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                dev = "cpu"
+            model = _TTS(TTSNarrator.XTTS_MODEL)
+            try:
+                model = model.to(dev)
+            except Exception:
+                dev = "cpu"
+            TTSNarrator._model = model
+            TTSNarrator._device = dev
+        return TTSNarrator._model
+
+    @staticmethod
+    def synthesize(text, speaker_wav, language="en", out_path=None):
+        """Render `text` to a wav file in the cloned voice and return its path."""
+        model = TTSNarrator._get_model()
+        if not out_path:
+            import tempfile
+            out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
+        model.tts_to_file(text=text, speaker_wav=speaker_wav,
+                          language=language, file_path=out_path)
+        return out_path
+
+
+def _play_wav_async(path):
+    """Play a wav file through the speakers without blocking (best-effort,
+    cross-platform). Returns True if playback was started."""
+    try:
+        if sys.platform.startswith("win"):
+            import winsound
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            return True
+    except Exception:
+        pass
+    try:
+        import shutil, subprocess
+        for player in (["afplay"], ["aplay", "-q"], ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]):
+            if shutil.which(player[0]):
+                subprocess.Popen(player + [path],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _stop_wav():
+    """Stop any wav started by _play_wav_async (Windows)."""
+    try:
+        if sys.platform.startswith("win"):
+            import winsound
+            winsound.PlaySound(None, winsound.SND_PURGE)
+    except Exception:
+        pass
 
 
 class NFOGenerator:
@@ -17347,6 +17434,138 @@ else:
     DnDCTk = ctk.CTk
 
 
+class NarrationDialog(ctk.CTkToplevel):
+    """Local text-to-speech with voice cloning (Coqui XTTS-v2). Type/paste text,
+    pick a short voice sample to clone, and preview the narration through the
+    speakers. Everything runs locally (GPU when available); nothing is saved."""
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Narration")
+        self.geometry("720x620")
+        self.transient(master)
+        self._busy = False
+
+        outer = ctk.CTkFrame(self, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+        outer.pack(fill="both", expand=True, padx=4, pady=4)
+        inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+
+        ParagonLabel(inner, text="NARRATION", style="header").pack(anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text="Type text, pick a voice sample to clone, and press Speak.",
+                     style="muted").pack(anchor="w", padx=16, pady=(0, 10))
+
+        # Voice sample row
+        r1 = ctk.CTkFrame(inner, fg_color="transparent"); r1.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(r1, text="Voice sample", style="muted", width=110, anchor="w").pack(side="left")
+        self.voice_e = ParagonEntry(r1, height=38)
+        self.voice_e.pack(side="left", fill="x", expand=True, padx=(4, 8))
+        self.voice_e.insert(0, pconfig_get("tts_speaker_wav", ""))
+        ParagonButton(r1, text="BROWSE", width=100, height=38,
+                      command=self._browse_voice).pack(side="left")
+
+        # Language row
+        r2 = ctk.CTkFrame(inner, fg_color="transparent"); r2.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(r2, text="Language", style="muted", width=110, anchor="w").pack(side="left")
+        self.lang_var = ctk.StringVar(value=pconfig_get("tts_language", "en"))
+        ParagonOptionMenu(r2, values=TTSNarrator.LANGUAGES, variable=self.lang_var,
+                          width=110).pack(side="left", padx=(4, 0))
+
+        # Text box
+        ParagonLabel(inner, text="Text", style="muted").pack(anchor="w", padx=16, pady=(8, 2))
+        self.text = ctk.CTkTextbox(inner, height=220, fg_color=ParagonTheme.BG_TERTIARY,
+                                   border_width=0)
+        self.text.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        self.text.insert("1.0", "Type or paste what you want narrated here.")
+
+        self.status = ParagonLabel(inner, text="", style="muted")
+        self.status.pack(anchor="w", padx=16, pady=(0, 4))
+
+        btns = ctk.CTkFrame(inner, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
+        ParagonSecondaryButton(btns, text="CLOSE", command=self.destroy, width=100).pack(side="left")
+        self.speak_btn = ParagonButton(btns, text="🔊 SPEAK", command=self._speak, width=160)
+        self.speak_btn.pack(side="right")
+        ParagonSecondaryButton(btns, text="■ STOP", command=self._stop, width=100).pack(side="right", padx=(0, 10))
+
+        self.after(80, lambda: (self.lift(), self.grab_set()))
+        if not TTSNarrator.available():
+            self.status.configure(text="⚠ Coqui TTS not installed — press Speak for install steps.")
+
+    def _browse_voice(self):
+        path = filedialog.askopenfilename(
+            title="Select a voice sample (6+ seconds of clean speech)",
+            filetypes=[("Audio", "*.wav *.mp3 *.flac *.m4a *.ogg"), ("All files", "*.*")],
+            parent=self)
+        if path:
+            self.voice_e.delete(0, "end")
+            self.voice_e.insert(0, path)
+
+    def _stop(self):
+        _stop_wav()
+        self.status.configure(text="Stopped.")
+
+    def _speak(self):
+        if self._busy:
+            return
+        if not TTSNarrator.available():
+            messagebox.showinfo(
+                "Coqui TTS not installed",
+                "Voice cloning needs Coqui TTS (XTTS-v2).\n\nInstall it with:\n"
+                "    py -3.14 -m pip install coqui-tts\n\n"
+                "If that fails on Python 3.14 (PyTorch may not have wheels yet),\n"
+                "use a Python 3.11–3.13 environment for TTS.\n\n"
+                "The XTTS model (~2 GB) downloads automatically on first use.",
+                parent=self)
+            return
+        text = self.text.get("1.0", "end").strip()
+        speaker = self.voice_e.get().strip()
+        lang = self.lang_var.get().strip() or "en"
+        if not text:
+            messagebox.showwarning("No text", "Type some text to narrate.", parent=self)
+            return
+        if not speaker or not os.path.isfile(speaker):
+            messagebox.showwarning("No voice sample",
+                                   "Pick a voice sample file to clone (Browse).", parent=self)
+            return
+        pconfig_set(tts_speaker_wav=speaker, tts_language=lang)
+        self._busy = True
+        try:
+            self.speak_btn.configure(state="disabled")
+        except Exception:
+            pass
+        self.status.configure(text="Generating… (first run downloads the model)")
+
+        def run():
+            err = None
+            out = None
+            try:
+                out = TTSNarrator.synthesize(text, speaker, lang)
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+
+            def done():
+                self._busy = False
+                try:
+                    self.speak_btn.configure(state="normal")
+                except Exception:
+                    pass
+                if err:
+                    self.status.configure(text="Failed — see popup.")
+                    messagebox.showerror("Narration failed", err, parent=self)
+                    return
+                dev = (TTSNarrator._device or "cpu").upper()
+                if _play_wav_async(out):
+                    self.status.configure(text=f"Playing… ({dev})")
+                else:
+                    self.status.configure(text=f"Rendered ({dev}) but no audio player found: {out}")
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+
 class PyRenamerApp(DnDCTk):
     """Main application - Paragon Edition"""
     
@@ -17775,6 +17994,8 @@ class PyRenamerApp(DnDCTk):
         ParagonButton(inner, text="📁  FILE LIBRARY", command=self._open_file_library,
                       width=155).pack(side="left", padx=(0, 8))
         ParagonButton(inner, text="🌾  HARVESTER", command=self._open_harvester,
+                      width=160).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="🔊  NARRATION", command=self._open_narration,
                       width=160).pack(side="left", padx=(0, 8))
 
         # Reopen the full-screen FILES window (it also auto-opens on load)
@@ -18694,6 +18915,10 @@ MusicBrainz Album Lookup:
             )
             return
         HarvesterDialog(self)
+
+    def _open_narration(self):
+        """Open the local TTS narration dialog (voice cloning via XTTS-v2)."""
+        NarrationDialog(self)
 
     def _open_movie_scraper(self):
         """Open movie scraper dialog"""
