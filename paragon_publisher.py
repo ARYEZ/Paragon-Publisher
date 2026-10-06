@@ -2924,6 +2924,66 @@ except Exception:
     pass
 
 
+class MicRecorder:
+    """Capture microphone audio to a 16 kHz mono WAV via sounddevice (optional
+    dependency). start() begins recording; finish(path) stops and writes the WAV."""
+    def __init__(self, samplerate=16000):
+        self.sr = samplerate
+        self._frames = []
+        self._stream = None
+
+    @staticmethod
+    def available():
+        try:
+            import sounddevice  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def start(self):
+        import sounddevice as sd
+        self._frames = []
+
+        def _cb(indata, frames, time_info, status):
+            self._frames.append(indata.copy())
+        self._stream = sd.InputStream(samplerate=self.sr, channels=1,
+                                      dtype="int16", callback=_cb)
+        self._stream.start()
+
+    def finish(self, path):
+        import numpy as np
+        import wave
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+        if not self._frames:
+            return None
+        audio = np.concatenate(self._frames, axis=0).reshape(-1).astype("int16")
+        if audio.size < self.sr // 4:   # < ~0.25s → nothing useful
+            return None
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(self.sr)
+            w.writeframes(audio.tobytes())
+        return path
+
+
+def ollama_chat(messages, url="http://localhost:11434", model="llama3.1", timeout=120):
+    """Send a chat conversation to Ollama and return the assistant's reply text."""
+    body = json.dumps({"model": model, "messages": messages,
+                       "stream": False}).encode("utf-8")
+    req = urllib.request.Request(url.rstrip("/") + "/api/chat", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode("utf-8", "replace"))
+    return (data.get("message", {}).get("content") or "").strip()
+
+
 class NFOGenerator:
     """Generate NFO files for Kodi/Plex/Jellyfin"""
     
@@ -17902,6 +17962,198 @@ class NarrationDialog(ctk.CTkToplevel):
         threading.Thread(target=run, daemon=True).start()
 
 
+class VoiceAgentDialog(ctk.CTkToplevel):
+    """Push-to-talk local voice agent (prototype): mic → Whisper (GPU) → Ollama
+    → Chatterbox, all local. Click TALK to record, STOP to get a spoken reply."""
+
+    DEFAULT_SYSTEM = ("You are Paragon, a local voice assistant. Keep replies short, "
+                      "natural and conversational — one or two sentences unless asked "
+                      "for more. Do not use markdown, emoji, or stage directions.")
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Voice Agent")
+        self.geometry("720x680")
+        self.transient(master)
+        self._recorder = MicRecorder()
+        self._recording = False
+        self._busy = False
+        self.messages = [{"role": "system",
+                          "content": pconfig_get("agent_system", self.DEFAULT_SYSTEM)}]
+
+        outer = ctk.CTkFrame(self, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
+        outer.pack(fill="both", expand=True, padx=4, pady=4)
+        inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+
+        ParagonLabel(inner, text="VOICE AGENT", style="header").pack(anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text="Talk → Whisper → Ollama → Chatterbox. All local.",
+                     style="muted").pack(anchor="w", padx=16, pady=(0, 8))
+
+        # Settings row: Ollama model, Whisper model
+        rs = ctk.CTkFrame(inner, fg_color="transparent"); rs.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(rs, text="LLM model", style="muted", width=90, anchor="w").pack(side="left")
+        self.model_e = ParagonEntry(rs, width=160, height=36)
+        self.model_e.insert(0, pconfig_get("agent_model", pconfig_get("plot_ollama_model", "llama3.1")))
+        self.model_e.pack(side="left", padx=(4, 12))
+        ParagonLabel(rs, text="Whisper", style="muted", anchor="w").pack(side="left")
+        self.whisper_var = ctk.StringVar(value=pconfig_get("agent_whisper", "base.en"))
+        ParagonOptionMenu(rs, values=["tiny.en", "base.en", "small.en", "medium.en"],
+                          variable=self.whisper_var, width=120).pack(side="left", padx=(4, 0))
+
+        # System prompt
+        ParagonLabel(inner, text="System prompt", style="muted").pack(anchor="w", padx=16, pady=(6, 2))
+        self.sys_e = ctk.CTkTextbox(inner, height=56, fg_color=ParagonTheme.BG_TERTIARY, border_width=0)
+        self.sys_e.pack(fill="x", padx=16, pady=(0, 6))
+        self.sys_e.insert("1.0", self.messages[0]["content"])
+
+        # Conversation transcript
+        ParagonLabel(inner, text="Conversation", style="muted").pack(anchor="w", padx=16, pady=(4, 2))
+        self.convo = ctk.CTkTextbox(inner, height=260, fg_color=ParagonTheme.BG_TERTIARY, border_width=0)
+        self.convo.pack(fill="both", expand=True, padx=16, pady=(0, 6))
+        self.convo.configure(state="disabled")
+
+        self.status = ParagonLabel(inner, text="", style="muted")
+        self.status.pack(anchor="w", padx=16, pady=(0, 4))
+
+        btns = ctk.CTkFrame(inner, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
+        ParagonSecondaryButton(btns, text="CLOSE", command=self._close, width=100).pack(side="left")
+        ParagonSecondaryButton(btns, text="CLEAR", command=self._clear, width=100).pack(side="left", padx=(10, 0))
+        self.talk_btn = ParagonButton(btns, text="🎤 TALK", command=self._toggle_talk, width=180)
+        self.talk_btn.pack(side="right")
+
+        self.after(80, lambda: (self.lift(), self.grab_set()))
+        missing = []
+        if not MicRecorder.available():
+            missing.append("sounddevice (mic)")
+        if not AudioTranscriber.available():
+            missing.append("faster-whisper (STT)")
+        if not TTSNarrator.available():
+            missing.append("TTS Python (voice) — set it in Narration")
+        if missing:
+            self.status.configure(text="⚠ Missing: " + ", ".join(missing))
+
+    def _append(self, who, text):
+        try:
+            self.convo.configure(state="normal")
+            self.convo.insert("end", f"{who}: {text}\n\n")
+            self.convo.see("end")
+            self.convo.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _set_status(self, text):
+        try:
+            self.status.configure(text=text)
+        except Exception:
+            pass
+
+    def _clear(self):
+        self.messages = [{"role": "system", "content": self.sys_e.get("1.0", "end").strip()
+                          or self.DEFAULT_SYSTEM}]
+        try:
+            self.convo.configure(state="normal")
+            self.convo.delete("1.0", "end")
+            self.convo.configure(state="disabled")
+        except Exception:
+            pass
+        self._set_status("Cleared.")
+
+    def _close(self):
+        try:
+            if self._recording:
+                self._recorder.finish(os.path.join(__import__("tempfile").gettempdir(),
+                                                    "paragon_agent_in.wav"))
+        except Exception:
+            pass
+        _stop_wav()
+        self.destroy()
+
+    def _toggle_talk(self):
+        if self._busy:
+            return
+        if not self._recording:
+            if not MicRecorder.available():
+                messagebox.showwarning(
+                    "Microphone unavailable",
+                    "Install the mic capture library in the app's Python:\n\n"
+                    "    py -3.14 -m pip install sounddevice", parent=self)
+                return
+            try:
+                self._recorder.start()
+            except Exception as e:
+                messagebox.showerror("Mic error", f"{type(e).__name__}: {e}", parent=self)
+                return
+            self._recording = True
+            _stop_wav()  # stop any reply still playing (barge-in)
+            self.talk_btn.configure(text="■ STOP")
+            self._set_status("Listening…")
+        else:
+            # Stop recording and process the turn
+            self._recording = False
+            self.talk_btn.configure(text="🎤 TALK")
+            import tempfile
+            wav = os.path.join(tempfile.gettempdir(), "paragon_agent_in.wav")
+            try:
+                got = self._recorder.finish(wav)
+            except Exception as e:
+                self._set_status(f"Mic error: {e}")
+                return
+            if not got:
+                self._set_status("Didn't catch anything — try again.")
+                return
+            self._process(wav)
+
+    def _process(self, wav):
+        self._busy = True
+        try:
+            self.talk_btn.configure(state="disabled")
+        except Exception:
+            pass
+        self._set_status("Transcribing…")
+        model = self.model_e.get().strip() or "llama3.1"
+        url = pconfig_get("plot_ollama_url", "http://localhost:11434")
+        wmodel = self.whisper_var.get()
+        sys_prompt = self.sys_e.get("1.0", "end").strip() or self.DEFAULT_SYSTEM
+        self.messages[0]["content"] = sys_prompt
+        engine = "chatterbox" if (pconfig_get("tts_engine", "Chatterbox") or "").lower() == "chatterbox" else "xtts"
+        pconfig_set(agent_model=model, agent_whisper=wmodel, agent_system=sys_prompt)
+
+        def run():
+            err = None
+            heard = reply = ""
+            try:
+                heard = (AudioTranscriber.transcribe(wav, wmodel) or "").strip()
+                if not heard:
+                    raise RuntimeError("no speech detected")
+                self.after(0, lambda: (self._append("You", heard), self._set_status("Thinking…")))
+                self.messages.append({"role": "user", "content": heard})
+                reply = ollama_chat(self.messages, url, model)
+                if not reply:
+                    raise RuntimeError("empty reply from Ollama")
+                self.messages.append({"role": "assistant", "content": reply})
+                self.after(0, lambda: (self._append("Paragon", reply), self._set_status("Speaking…")))
+                out = os.path.join(__import__("tempfile").gettempdir(), "paragon_agent_out.wav")
+                TTSNarrator.synthesize(reply, out_path=out, engine=engine)
+                _play_wav_async(out)
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+
+            def done():
+                self._busy = False
+                try:
+                    self.talk_btn.configure(state="normal")
+                except Exception:
+                    pass
+                self._set_status("Ready." if not err else f"Error: {err}")
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+
 class PyRenamerApp(DnDCTk):
     """Main application - Paragon Edition"""
     
@@ -18333,6 +18585,8 @@ class PyRenamerApp(DnDCTk):
                       width=160).pack(side="left", padx=(0, 8))
         ParagonButton(inner, text="🔊  NARRATION", command=self._open_narration,
                       width=160).pack(side="left", padx=(0, 8))
+        ParagonButton(inner, text="🎙  VOICE AGENT", command=self._open_voice_agent,
+                      width=175).pack(side="left", padx=(0, 8))
 
         # Reopen the full-screen FILES window (it also auto-opens on load)
         ParagonSecondaryButton(inner, text="⛶  FILES WINDOW", command=self._open_files_popout,
@@ -19255,6 +19509,10 @@ MusicBrainz Album Lookup:
     def _open_narration(self):
         """Open the local TTS narration dialog (voice cloning via XTTS-v2)."""
         NarrationDialog(self)
+
+    def _open_voice_agent(self):
+        """Open the push-to-talk local voice agent prototype."""
+        VoiceAgentDialog(self)
 
     def _open_movie_scraper(self):
         """Open movie scraper dialog"""
