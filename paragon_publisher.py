@@ -2689,56 +2689,76 @@ class PlotSummarizer:
 
 
 class TTSNarrator:
-    """Local text-to-speech with voice cloning via Coqui XTTS-v2 (optional
-    dependency — the model downloads on first use and runs entirely on the
-    user's machine; it uses CUDA when present). Give it a short reference clip
-    of a voice and it reads your text in that voice."""
-    _model = None
+    """Local text-to-speech with voice cloning via Coqui XTTS-v2.
+
+    XTTS needs PyTorch, which has no wheels for the Python this app runs on
+    (3.14). So instead of importing TTS in-process, we shell out to a SIDE
+    Python 3.11–3.13 that has torch + coqui-tts installed, running the bundled
+    paragon_tts_worker.py. The user points us at that interpreter; everything
+    still runs locally and on the GPU."""
     _device = None
-    XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
     LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
                  "cs", "ar", "zh-cn", "ja", "hu", "ko", "hi"]
 
     @staticmethod
-    def available():
-        try:
-            import TTS  # noqa: F401  (coqui-tts / TTS)
-            return True
-        except Exception:
-            return False
+    def _python():
+        return (pconfig_get("tts_python", "") or "").strip()
 
     @staticmethod
-    def _get_model():
-        if TTSNarrator._model is None:
-            # Reuse the CUDA DLL shim so the GPU is found on Windows.
-            try:
-                AudioTranscriber._ensure_cuda_libs()
-            except Exception:
-                pass
-            from TTS.api import TTS as _TTS
-            try:
-                import torch
-                dev = "cuda" if torch.cuda.is_available() else "cpu"
-            except Exception:
-                dev = "cpu"
-            model = _TTS(TTSNarrator.XTTS_MODEL)
-            try:
-                model = model.to(dev)
-            except Exception:
-                dev = "cpu"
-            TTSNarrator._model = model
-            TTSNarrator._device = dev
-        return TTSNarrator._model
+    def _worker():
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(here, "paragon_tts_worker.py")
+
+    @staticmethod
+    def available():
+        """True once a side Python is configured and the worker script exists."""
+        py = TTSNarrator._python()
+        return bool(py and os.path.isfile(py) and os.path.isfile(TTSNarrator._worker()))
+
+    @staticmethod
+    def check():
+        """Return (ok, message): can the side env import torch + TTS?"""
+        py = TTSNarrator._python()
+        if not py or not os.path.isfile(py):
+            return False, ("Set 'TTS Python' to the python.exe of a Python 3.11–3.13\n"
+                           "environment that has torch + coqui-tts installed.")
+        worker = TTSNarrator._worker()
+        if not os.path.isfile(worker):
+            return False, f"Worker script is missing:\n{worker}"
+        import subprocess
+        try:
+            p = subprocess.run([py, worker, "--check"], capture_output=True,
+                               text=True, timeout=180)
+        except Exception as e:
+            return False, f"Couldn't run that Python:\n{e}"
+        if p.returncode == 0:
+            return True, (p.stdout.strip() or "OK")
+        return False, (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}")
 
     @staticmethod
     def synthesize(text, speaker_wav, language="en", out_path=None):
-        """Render `text` to a wav file in the cloned voice and return its path."""
-        model = TTSNarrator._get_model()
+        """Render `text` to a wav in the cloned voice (via the side Python) and
+        return its path. Raises RuntimeError with the worker's message on error."""
+        py = TTSNarrator._python()
+        worker = TTSNarrator._worker()
+        if not (py and os.path.isfile(py)):
+            raise RuntimeError("TTS Python is not configured (set it in the Narration panel).")
+        if not os.path.isfile(worker):
+            raise RuntimeError(f"Worker script is missing:\n{worker}")
+        import tempfile, subprocess
+        tmp = tempfile.gettempdir()
         if not out_path:
-            import tempfile
-            out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
-        model.tts_to_file(text=text, speaker_wav=speaker_wav,
-                          language=language, file_path=out_path)
+            out_path = os.path.join(tmp, "paragon_tts_preview.wav")
+        text_file = os.path.join(tmp, "paragon_tts_text.txt")
+        with open(text_file, "w", encoding="utf-8") as f:
+            f.write(text or "")
+        cmd = [py, worker, "--text-file", text_file, "--speaker", speaker_wav,
+               "--language", language, "--out", out_path]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if p.returncode != 0:
+            msg = (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}")
+            raise RuntimeError(msg[:800])
+        TTSNarrator._device = "cuda" if "device=cuda" in (p.stdout or "") else "cpu"
         return out_path
 
 
@@ -17469,6 +17489,17 @@ class NarrationDialog(ctk.CTkToplevel):
         ParagonLabel(inner, text="Type text, pick a voice sample to clone, and press Speak.",
                      style="muted").pack(anchor="w", padx=16, pady=(0, 10))
 
+        # TTS Python (side 3.11–3.13 env with torch + coqui-tts) row
+        r0 = ctk.CTkFrame(inner, fg_color="transparent"); r0.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(r0, text="TTS Python", style="muted", width=110, anchor="w").pack(side="left")
+        self.pyexe_e = ParagonEntry(r0, height=38)
+        self.pyexe_e.pack(side="left", fill="x", expand=True, padx=(4, 8))
+        self.pyexe_e.insert(0, pconfig_get("tts_python", ""))
+        ParagonButton(r0, text="BROWSE", width=100, height=38,
+                      command=self._browse_python).pack(side="left", padx=(0, 6))
+        ParagonButton(r0, text="TEST", width=80, height=38,
+                      command=self._test_env).pack(side="left")
+
         # Voice sample row
         r1 = ctk.CTkFrame(inner, fg_color="transparent"); r1.pack(fill="x", padx=16, pady=4)
         ParagonLabel(r1, text="Voice sample", style="muted", width=110, anchor="w").pack(side="left")
@@ -17504,7 +17535,7 @@ class NarrationDialog(ctk.CTkToplevel):
 
         self.after(80, lambda: (self.lift(), self.grab_set()))
         if not TTSNarrator.available():
-            self.status.configure(text="⚠ Coqui TTS not installed — press Speak for install steps.")
+            self.status.configure(text="⚠ Set 'TTS Python' to your 3.11–3.13 env — press TEST to verify.")
 
     def _browse_voice(self):
         path = filedialog.askopenfilename(
@@ -17515,6 +17546,47 @@ class NarrationDialog(ctk.CTkToplevel):
             self.voice_e.delete(0, "end")
             self.voice_e.insert(0, path)
 
+    def _browse_python(self):
+        path = filedialog.askopenfilename(
+            title="Select the Python 3.11–3.13 interpreter (with torch + coqui-tts)",
+            filetypes=[("Python", "python*.exe python3*"), ("All files", "*.*")],
+            parent=self)
+        if path:
+            self.pyexe_e.delete(0, "end")
+            self.pyexe_e.insert(0, path)
+
+    def _test_env(self):
+        py = self.pyexe_e.get().strip()
+        if py:
+            pconfig_set(tts_python=py)
+        self.status.configure(text="Testing TTS environment…")
+
+        def run():
+            ok, msg = TTSNarrator.check()
+
+            def show():
+                self.status.configure(text="TTS env ✓" if ok else "TTS env not ready")
+                if ok:
+                    messagebox.showinfo(
+                        "TTS Environment",
+                        "Voice cloning is ready.\n\n" + msg + "\n\n"
+                        "(device=cuda means it will run on your GPU.)", parent=self)
+                else:
+                    messagebox.showwarning(
+                        "TTS Environment",
+                        msg + "\n\nSet up the side env (one time), e.g.:\n"
+                        "  py -3.12 -m venv C:\\ttsenv\n"
+                        "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
+                        "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
+                        "      --index-url https://download.pytorch.org/whl/cu121\n\n"
+                        "Then point 'TTS Python' at:\n"
+                        "  C:\\ttsenv\\Scripts\\python.exe", parent=self)
+            try:
+                self.after(0, show)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
     def _stop(self):
         _stop_wav()
         self.status.configure(text="Stopped.")
@@ -17522,14 +17594,22 @@ class NarrationDialog(ctk.CTkToplevel):
     def _speak(self):
         if self._busy:
             return
+        pyexe = self.pyexe_e.get().strip()
+        if pyexe:
+            pconfig_set(tts_python=pyexe)
         if not TTSNarrator.available():
             messagebox.showinfo(
-                "Coqui TTS not installed",
-                "Voice cloning needs Coqui TTS (XTTS-v2).\n\nInstall it with:\n"
-                "    py -3.14 -m pip install coqui-tts\n\n"
-                "If that fails on Python 3.14 (PyTorch may not have wheels yet),\n"
-                "use a Python 3.11–3.13 environment for TTS.\n\n"
-                "The XTTS model (~2 GB) downloads automatically on first use.",
+                "TTS environment not set",
+                "Voice cloning (XTTS-v2) needs PyTorch, which has no wheels for\n"
+                "Python 3.14 — so Paragon runs it in a side Python 3.11–3.13.\n\n"
+                "Set it up once (example with Python 3.12):\n"
+                "  py -3.12 -m venv C:\\ttsenv\n"
+                "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
+                "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
+                "      --index-url https://download.pytorch.org/whl/cu121\n\n"
+                "Then set 'TTS Python' above to:\n"
+                "  C:\\ttsenv\\Scripts\\python.exe\n\n"
+                "Press TEST to verify. The XTTS model (~2 GB) downloads on first use.",
                 parent=self)
             return
         text = self.text.get("1.0", "end").strip()
