@@ -25,6 +25,10 @@ import glob
 import os
 import sys
 
+# XTTS shows an interactive "agree to the (non-commercial) ToS" prompt on first
+# download. We run headless as a subprocess, so auto-agree to avoid a hang.
+os.environ.setdefault("COQUI_TOS_AGREED", "1")
+
 XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 
 
