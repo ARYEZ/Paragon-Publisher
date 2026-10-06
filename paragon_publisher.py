@@ -2476,6 +2476,8 @@ class AudioTranscriber:
     downloads on first use and runs entirely on the user's machine)."""
     _model = None
     _model_size = None
+    _wake_model = None       # separate cache so wake-word polling doesn't thrash
+    _wake_size = None
 
     @staticmethod
     def available():
@@ -2520,6 +2522,29 @@ class AudioTranscriber:
             AudioTranscriber._model = WhisperModel(size, device="auto", compute_type="int8")
             AudioTranscriber._model_size = size
         return AudioTranscriber._model
+
+    @staticmethod
+    def _get_wake_model(size):
+        """A dedicated small model for wake-word polling, cached separately so it
+        doesn't force the main model to reload between wake checks and commands."""
+        AudioTranscriber._ensure_cuda_libs()
+        from faster_whisper import WhisperModel
+        if AudioTranscriber._wake_model is None or AudioTranscriber._wake_size != size:
+            AudioTranscriber._wake_model = WhisperModel(size, device="auto", compute_type="int8")
+            AudioTranscriber._wake_size = size
+        return AudioTranscriber._wake_model
+
+    @staticmethod
+    def transcribe_array(audio_f32, model_size="tiny.en", beam_size=1, wake=False,
+                         language="en"):
+        """Transcribe a float32 numpy array directly (no WAV/ffmpeg round-trip).
+        Used for low-latency wake-word polling. `language` is fixed to skip the
+        language-detection pass."""
+        model = (AudioTranscriber._get_wake_model(model_size) if wake
+                 else AudioTranscriber._get_model(model_size))
+        segments, _ = model.transcribe(audio_f32, beam_size=max(1, int(beam_size)),
+                                       language=language)
+        return " ".join(s.text for s in segments).strip()
 
     @staticmethod
     def _decode_pcm(filepath, sr=16000, max_seconds=0):
@@ -18267,42 +18292,66 @@ class VoiceAgentDialog(ctk.CTkToplevel):
                                                     "paragon_agent_in.wav"), sr)
 
     def _wake_loop(self):
+        """Low-latency wake-word polling: a rolling 1.5s buffer checked every
+        ~0.5s, transcribed directly from memory with a small tiny.en model."""
+        import sounddevice as sd
         import numpy as np
-        import tempfile
-        win = os.path.join(tempfile.gettempdir(), "paragon_wake.wav")
-        wmodel = self.whisper_var.get()
-        while not self._wake_stop.is_set():
-            if self._busy:
-                self._wake_stop.wait(0.2)
-                continue
+        import collections
+        sr = 16000
+        hop = 0.5           # seconds between checks
+        win_sec = 1.5       # context window the model sees
+        wmodel = pconfig_get("agent_wake_model", "tiny.en")
+        chunks = collections.deque(maxlen=max(1, int(round(win_sec / hop))))
+
+        def _trigger():
+            # Pause polling, capture the command (its own stream), run the turn.
+            self._busy = True
+            self.after(0, lambda: self._set_status("Yes? Listening…"))
+            cmd = None
             try:
-                arr = self._record_window(2.0)
+                cmd = self._capture_command()
+            except Exception as e:
+                print(f"wake capture error: {e}")
+            if cmd and not self._wake_stop.is_set():
+                self.after(0, lambda c=cmd: self._process(c))
+                while self._busy and not self._wake_stop.is_set():
+                    self._wake_stop.wait(0.2)
+            else:
+                self._busy = False
+
+        while not self._wake_stop.is_set():
+            try:
+                stream = sd.InputStream(samplerate=sr, channels=1, dtype="int16")
+                stream.start()
             except Exception as e:
                 self.after(0, lambda e=e: self._set_status(f"Wake mic error: {e}"))
                 break
-            if self._rms(arr) < 350:   # cheap gate: skip transcribing near-silence
-                continue
+            chunks.clear()
             try:
-                self._write_wav(arr, win)
-                txt = (AudioTranscriber.transcribe(win, wmodel) or "").lower()
-            except Exception:
-                txt = ""
-            if any(k in txt for k in self.WAKE_KEYS) and not self._wake_stop.is_set():
-                self._busy = True   # block manual input during capture + turn
-                self.after(0, lambda: self._set_status("Yes? Listening…"))
-                cmd = None
+                while not self._wake_stop.is_set():
+                    data, _ = stream.read(int(sr * hop))
+                    chunks.append(np.asarray(data).reshape(-1).copy())
+                    window = np.concatenate(chunks)
+                    if self._rms(window) < 300:       # skip near-silence cheaply
+                        continue
+                    try:
+                        f32 = window.astype("float32") / 32768.0
+                        txt = AudioTranscriber.transcribe_array(
+                            f32, wmodel, beam_size=1, wake=True).lower()
+                    except Exception:
+                        txt = ""
+                    if any(k in txt for k in self.WAKE_KEYS):
+                        break                          # wake detected → go trigger
+            finally:
                 try:
-                    cmd = self._capture_command()
-                except Exception as e:
-                    print(f"wake capture error: {e}")
-                if cmd and not self._wake_stop.is_set():
-                    self.after(0, lambda c=cmd: self._process(c))
-                    while self._busy and not self._wake_stop.is_set():
-                        self._wake_stop.wait(0.2)   # wait out the turn
-                else:
-                    self._busy = False
-                if not self._wake_stop.is_set():
-                    self.after(0, lambda: self._set_status("Listening for “Hey Ajax”…"))
+                    stream.stop(); stream.close()      # free the mic before capture
+                except Exception:
+                    pass
+            if self._wake_stop.is_set():
+                break
+            _trigger()
+            if not self._wake_stop.is_set():
+                self.after(0, lambda: self._set_status("Listening for “Hey Ajax”…"))
         self.after(0, lambda: (self.wake_btn.configure(text="👂 WAKE: OFF"),
                                self._set_status("Wake word off.")))
 
