@@ -63,16 +63,92 @@ def _allowlist_xtts():
         pass
 
 
+def serve(model_name=XTTS_MODEL):
+    """Persistent mode: load XTTS once, then read one JSON request per line from
+    stdin and reply with one JSON line on stdout. All library chatter is routed
+    to stderr so stdout carries only the JSON protocol.
+
+    Request:  {"text": "...", "speaker": "voice.wav", "language": "en", "out": "out.wav"}
+              {"cmd": "quit"}
+    Reply:    {"ready": true, "device": "cuda"}  (once, at startup)
+              {"ok": true, "device": "cuda", "out": "out.wav"}  (per request)
+              {"ok": false, "error": "..."}"""
+    import json as _json
+    _add_cuda_dll_dirs()
+    real_out = sys.stdout
+    sys.stdout = sys.stderr  # keep the protocol stream clean
+
+    def respond(obj):
+        try:
+            real_out.write(_json.dumps(obj) + "\n")
+            real_out.flush()
+        except Exception:
+            pass
+
+    try:
+        import torch
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception as e:
+        respond({"ready": False, "error": f"PyTorch not available: {e}"})
+        return 3
+    try:
+        _allowlist_xtts()
+        from TTS.api import TTS as _TTS
+        model = _TTS(model_name)
+        try:
+            model = model.to(dev)
+        except Exception:
+            dev = "cpu"
+    except Exception as e:
+        respond({"ready": False, "error": f"{type(e).__name__}: {e}"})
+        return 1
+
+    respond({"ready": True, "device": dev})
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = _json.loads(line)
+        except Exception:
+            respond({"ok": False, "error": "bad request json"})
+            continue
+        if req.get("cmd") == "quit":
+            break
+        try:
+            text = (req.get("text") or "").strip()
+            speaker = req.get("speaker") or ""
+            out = req.get("out") or ""
+            lang = req.get("language") or "en"
+            if not text:
+                raise ValueError("empty text")
+            if not os.path.isfile(speaker):
+                raise ValueError(f"speaker file not found: {speaker}")
+            if not out:
+                raise ValueError("no output path")
+            model.tts_to_file(text=text, speaker_wav=speaker, language=lang, file_path=out)
+            respond({"ok": True, "device": dev, "out": out})
+        except Exception as e:
+            respond({"ok": False, "error": f"{type(e).__name__}: {e}"})
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="Paragon TTS worker (XTTS-v2)")
     ap.add_argument("--check", action="store_true",
                     help="verify torch + TTS import and print the device")
+    ap.add_argument("--serve", action="store_true",
+                    help="persistent mode: keep the model loaded and take JSON requests on stdin")
     ap.add_argument("--text-file", help="UTF-8 file with the text to narrate")
     ap.add_argument("--speaker", help="reference voice clip (wav/mp3) to clone")
     ap.add_argument("--language", default="en")
     ap.add_argument("--out", help="output wav path")
     ap.add_argument("--model", default=XTTS_MODEL)
     a = ap.parse_args()
+
+    if a.serve:
+        return serve(a.model)
 
     _add_cuda_dll_dirs()
 

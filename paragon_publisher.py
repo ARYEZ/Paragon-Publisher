@@ -2697,6 +2697,9 @@ class TTSNarrator:
     paragon_tts_worker.py. The user points us at that interpreter; everything
     still runs locally and on the GPU."""
     _device = None
+    _proc = None          # persistent worker subprocess (model stays warm in VRAM)
+    _proc_py = None       # the interpreter the worker was started with
+    _proc_lock = threading.Lock()
     LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
                  "cs", "ar", "zh-cn", "ja", "hu", "ko", "hi"]
 
@@ -2736,30 +2739,103 @@ class TTSNarrator:
         return False, (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}")
 
     @staticmethod
-    def synthesize(text, speaker_wav, language="en", out_path=None):
-        """Render `text` to a wav in the cloned voice (via the side Python) and
-        return its path. Raises RuntimeError with the worker's message on error."""
+    def _read_json(proc, tries=500):
+        """Read stdout lines until one parses as JSON (library noise goes to the
+        worker's stderr, so this normally hits on the first line)."""
+        for _ in range(tries):
+            line = proc.stdout.readline()
+            if not line:
+                return None
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _ensure_proc():
+        """Start (or reuse) the persistent worker; it loads XTTS once and keeps
+        it warm in VRAM. Returns the live process. Raises on startup failure."""
+        import subprocess
+        proc = TTSNarrator._proc
         py = TTSNarrator._python()
+        if proc is not None and proc.poll() is None and TTSNarrator._proc_py == py:
+            return proc
+        TTSNarrator._kill()  # dead, or the interpreter changed — restart
         worker = TTSNarrator._worker()
         if not (py and os.path.isfile(py)):
             raise RuntimeError("TTS Python is not configured (set it in the Narration panel).")
         if not os.path.isfile(worker):
             raise RuntimeError(f"Worker script is missing:\n{worker}")
-        import tempfile, subprocess
-        tmp = tempfile.gettempdir()
+        proc = subprocess.Popen([py, worker, "--serve"],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, bufsize=1)
+
+        def _drain(p=proc):  # keep stderr from filling and blocking the worker
+            try:
+                for _ in p.stderr:
+                    pass
+            except Exception:
+                pass
+        threading.Thread(target=_drain, daemon=True).start()
+
+        data = TTSNarrator._read_json(proc)  # waits for the one-time model load
+        if not data or not data.get("ready"):
+            err = (data or {}).get("error", "worker exited during startup")
+            TTSNarrator._kill()
+            raise RuntimeError(err)
+        TTSNarrator._proc = proc
+        TTSNarrator._proc_py = py
+        TTSNarrator._device = data.get("device")
+        return proc
+
+    @staticmethod
+    def _kill():
+        proc = TTSNarrator._proc
+        TTSNarrator._proc = None
+        TTSNarrator._proc_py = None
+        if proc is not None:
+            try:
+                if proc.stdin:
+                    try:
+                        proc.stdin.write('{"cmd": "quit"}\n'); proc.stdin.flush()
+                    except Exception:
+                        pass
+                proc.terminate()
+            except Exception:
+                pass
+
+    @staticmethod
+    def synthesize(text, speaker_wav, language="en", out_path=None):
+        """Render `text` to a wav in the cloned voice via the persistent worker
+        (model stays warm across calls). Raises RuntimeError on failure."""
+        import tempfile
         if not out_path:
-            out_path = os.path.join(tmp, "paragon_tts_preview.wav")
-        text_file = os.path.join(tmp, "paragon_tts_text.txt")
-        with open(text_file, "w", encoding="utf-8") as f:
-            f.write(text or "")
-        cmd = [py, worker, "--text-file", text_file, "--speaker", speaker_wav,
-               "--language", language, "--out", out_path]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        if p.returncode != 0:
-            msg = (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}")
-            raise RuntimeError(msg[:800])
-        TTSNarrator._device = "cuda" if "device=cuda" in (p.stdout or "") else "cpu"
-        return out_path
+            out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
+        req = json.dumps({"text": text or "", "speaker": speaker_wav,
+                          "language": language or "en", "out": out_path})
+        with TTSNarrator._proc_lock:
+            data = None
+            for attempt in (1, 2):  # restart the worker once if the pipe is dead
+                try:
+                    proc = TTSNarrator._ensure_proc()
+                    proc.stdin.write(req + "\n")
+                    proc.stdin.flush()
+                    data = TTSNarrator._read_json(proc)
+                except (BrokenPipeError, OSError):
+                    data = None
+                if data is not None:
+                    break
+                TTSNarrator._kill()  # worker died — retry once with a fresh one
+            if data is None:
+                raise RuntimeError("TTS worker did not respond.")
+            if not data.get("ok"):
+                raise RuntimeError((data.get("error") or "synthesis failed")[:800])
+            TTSNarrator._device = data.get("device") or TTSNarrator._device
+            return out_path
 
 
 def _play_wav_async(path):
@@ -2792,6 +2868,14 @@ def _stop_wav():
             winsound.PlaySound(None, winsound.SND_PURGE)
     except Exception:
         pass
+
+
+# Shut the persistent TTS worker down on exit so it doesn't linger in VRAM.
+try:
+    import atexit as _atexit
+    _atexit.register(TTSNarrator._kill)
+except Exception:
+    pass
 
 
 class NFOGenerator:
@@ -17630,7 +17714,9 @@ class NarrationDialog(ctk.CTkToplevel):
             self.speak_btn.configure(state="disabled")
         except Exception:
             pass
-        self.status.configure(text="Generating… (first run downloads the model)")
+        _warm = (TTSNarrator._proc is not None and TTSNarrator._proc.poll() is None)
+        self.status.configure(text="Generating…" if _warm else
+                              "Loading voice model… (first run downloads ~2 GB)")
 
         def run():
             err = None
