@@ -17635,7 +17635,7 @@ class NarrationDialog(ctk.CTkToplevel):
         self.DEFAULT_LABEL = "Default voice"
         rE = ctk.CTkFrame(inner, fg_color="transparent"); rE.pack(fill="x", padx=16, pady=4)
         ParagonLabel(rE, text="Engine", style="muted", width=110, anchor="w").pack(side="left")
-        self.engine_var = ctk.StringVar(value=pconfig_get("tts_engine", "XTTS"))
+        self.engine_var = ctk.StringVar(value=(pconfig_get("tts_engine", "") or "Chatterbox"))
         ParagonOptionMenu(rE, values=["XTTS", "Chatterbox"], variable=self.engine_var,
                           width=150, command=self._on_engine_change).pack(side="left", padx=(4, 0))
 
@@ -17800,19 +17800,22 @@ class NarrationDialog(ctk.CTkToplevel):
         if pyexe:
             pconfig_set(tts_python=pyexe)
         if not TTSNarrator.available():
+            _is_cb = (self.engine_var.get().lower() == "chatterbox")
+            _pkg = "chatterbox-tts" if _is_cb else "coqui-tts"
+            _extra = "" if _is_cb else "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n"
             messagebox.showinfo(
                 "TTS environment not set",
-                "Voice cloning (XTTS-v2) needs PyTorch, which has no wheels for\n"
+                "This voice engine needs PyTorch, which has no wheels for\n"
                 "Python 3.14 — so Paragon runs it in a side Python 3.11–3.13.\n\n"
                 "Set it up once (example with Python 3.12):\n"
                 "  py -3.12 -m venv C:\\ttsenv\n"
-                "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
                 "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
                 "      --index-url https://download.pytorch.org/whl/cu121\n"
-                "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n\n"
+                f"  C:\\ttsenv\\Scripts\\pip install {_pkg}\n"
+                f"{_extra}\n"
                 "Then set 'TTS Python' above to:\n"
                 "  C:\\ttsenv\\Scripts\\python.exe\n\n"
-                "Press TEST to verify. The XTTS model (~2 GB) downloads on first use.",
+                "Press TEST to verify. The model downloads on first use.",
                 parent=self)
             return
         text = self.text.get("1.0", "end").strip()
@@ -17861,7 +17864,7 @@ class NarrationDialog(ctk.CTkToplevel):
             pass
         _warm = (TTSNarrator._proc is not None and TTSNarrator._proc.poll() is None)
         self.status.configure(text="Generating…" if _warm else
-                              "Loading voice model… (first run downloads ~2 GB)")
+                              "Loading voice model… (first run downloads the model)")
 
         def run():
             err = None
