@@ -18019,9 +18019,15 @@ class VoiceAgentDialog(ctk.CTkToplevel):
     """Push-to-talk local voice agent (prototype): mic → Whisper (GPU) → Ollama
     → Chatterbox, all local. Click TALK to record, STOP to get a spoken reply."""
 
-    DEFAULT_SYSTEM = ("You are Paragon, a local voice assistant. Keep replies short, "
+    DEFAULT_SYSTEM = ("You are Ajax, a local voice assistant. Keep replies short, "
                       "natural and conversational — one or two sentences unless asked "
                       "for more. Do not use markdown, emoji, or stage directions.")
+    _OLD_DEFAULT_SYSTEM = ("You are Paragon, a local voice assistant. Keep replies short, "
+                           "natural and conversational — one or two sentences unless asked "
+                           "for more. Do not use markdown, emoji, or stage directions.")
+    AGENT_NAME = "Ajax"
+    # Whisper often mis-hears "Ajax"; accept close variants as the wake word.
+    WAKE_KEYS = ["ajax", "a jax", "ajacks", "a jacks", "ajac", "ay jax", "a jacks"]
 
     def __init__(self, master):
         super().__init__(master)
@@ -18031,16 +18037,22 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         self._recorder = MicRecorder()
         self._recording = False
         self._busy = False
-        self.messages = [{"role": "system",
-                          "content": pconfig_get("agent_system", self.DEFAULT_SYSTEM)}]
+        self._wake_on = False
+        self._wake_stop = threading.Event()
+        self._wake_thread = None
+        # Load the stored system prompt, migrating the old "Paragon" default to Ajax.
+        _sys = pconfig_get("agent_system", "")
+        if not _sys or _sys.strip() == self._OLD_DEFAULT_SYSTEM:
+            _sys = self.DEFAULT_SYSTEM
+        self.messages = [{"role": "system", "content": _sys}]
 
         outer = ctk.CTkFrame(self, fg_color=ParagonTheme.BORDER_GOLD, corner_radius=12)
         outer.pack(fill="both", expand=True, padx=4, pady=4)
         inner = ctk.CTkFrame(outer, fg_color=ParagonTheme.BG_DARK, corner_radius=10)
         inner.pack(fill="both", expand=True, padx=2, pady=2)
 
-        ParagonLabel(inner, text="VOICE AGENT", style="header").pack(anchor="w", padx=16, pady=(14, 2))
-        ParagonLabel(inner, text="Talk → Whisper → Ollama → Chatterbox. All local.",
+        ParagonLabel(inner, text="AJAX — VOICE AGENT", style="header").pack(anchor="w", padx=16, pady=(14, 2))
+        ParagonLabel(inner, text="Talk (or say “Hey Ajax”) → Whisper → Ollama → Chatterbox. All local.",
                      style="muted").pack(anchor="w", padx=16, pady=(0, 8))
 
         # Settings row: Ollama model, Whisper model
@@ -18089,8 +18101,11 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         btns.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
         ParagonSecondaryButton(btns, text="CLOSE", command=self._close, width=100).pack(side="left")
         ParagonSecondaryButton(btns, text="CLEAR", command=self._clear, width=100).pack(side="left", padx=(10, 0))
-        self.talk_btn = ParagonButton(btns, text="🎤 TALK", command=self._toggle_talk, width=180)
+        self.talk_btn = ParagonButton(btns, text="🎤 TALK", command=self._toggle_talk, width=160)
         self.talk_btn.pack(side="right")
+        self.wake_btn = ParagonSecondaryButton(btns, text="👂 WAKE: OFF",
+                                               command=self._toggle_wake, width=150)
+        self.wake_btn.pack(side="right", padx=(0, 10))
 
         self.after(80, lambda: (self.lift(), self.grab_set()))
         missing = []
@@ -18149,6 +18164,11 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         self._set_status("Cleared.")
 
     def _close(self):
+        self._wake_on = False
+        try:
+            self._wake_stop.set()
+        except Exception:
+            pass
         try:
             if self._recording:
                 self._recorder.finish(os.path.join(__import__("tempfile").gettempdir(),
@@ -18157,6 +18177,134 @@ class VoiceAgentDialog(ctk.CTkToplevel):
             pass
         _stop_wav()
         self.destroy()
+
+    def _toggle_wake(self):
+        if self._wake_on:
+            self._wake_on = False
+            self._wake_stop.set()
+            self.wake_btn.configure(text="👂 WAKE: OFF")
+            self._set_status("Wake word off.")
+            return
+        if not MicRecorder.available():
+            messagebox.showwarning(
+                "Microphone unavailable",
+                "Install the mic library in the app's Python:\n\n"
+                "    py -3.14 -m pip install sounddevice", parent=self)
+            return
+        if not AudioTranscriber.available():
+            messagebox.showwarning("Whisper unavailable",
+                                   "faster-whisper (STT) isn't available.", parent=self)
+            return
+        self._wake_stop = threading.Event()
+        self._wake_on = True
+        self.wake_btn.configure(text="👂 WAKE: ON")
+        self._set_status("Listening for “Hey Ajax”…")
+        self._wake_thread = threading.Thread(target=self._wake_loop, daemon=True)
+        self._wake_thread.start()
+
+    def _record_window(self, seconds, sr=16000):
+        """Record a short fixed window and return an int16 numpy array."""
+        import sounddevice as sd
+        rec = sd.rec(int(seconds * sr), samplerate=sr, channels=1, dtype="int16")
+        sd.wait()
+        return rec.reshape(-1)
+
+    @staticmethod
+    def _rms(arr):
+        import numpy as np
+        if arr is None or arr.size == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(arr.astype("float32") ** 2)))
+
+    def _write_wav(self, arr, path, sr=16000):
+        import wave
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(arr.astype("int16").tobytes())
+        return path
+
+    def _capture_command(self, max_sec=12.0, silence_sec=1.3, sr=16000):
+        """Record the spoken command, stopping after a pause (simple energy VAD).
+        Returns a wav path, or None if nothing was said."""
+        import sounddevice as sd
+        import numpy as np
+        import tempfile
+        block = 0.1
+        frames = []
+        started = False
+        silent = 0.0
+        elapsed = 0.0
+        thresh = 600.0
+        stream = sd.InputStream(samplerate=sr, channels=1, dtype="int16")
+        stream.start()
+        try:
+            while elapsed < max_sec and not self._wake_stop.is_set():
+                data, _ = stream.read(int(sr * block))
+                arr = np.asarray(data).reshape(-1)
+                frames.append(arr.copy())
+                elapsed += block
+                level = self._rms(arr)
+                if level > thresh:
+                    started = True
+                    silent = 0.0
+                elif started:
+                    silent += block
+                    if silent >= silence_sec:
+                        break
+                elif elapsed > 4.0:
+                    return None   # no speech after the wake word
+        finally:
+            try:
+                stream.stop(); stream.close()
+            except Exception:
+                pass
+        if not started or not frames:
+            return None
+        audio = np.concatenate(frames).astype("int16")
+        return self._write_wav(audio, os.path.join(tempfile.gettempdir(),
+                                                    "paragon_agent_in.wav"), sr)
+
+    def _wake_loop(self):
+        import numpy as np
+        import tempfile
+        win = os.path.join(tempfile.gettempdir(), "paragon_wake.wav")
+        wmodel = self.whisper_var.get()
+        while not self._wake_stop.is_set():
+            if self._busy:
+                self._wake_stop.wait(0.2)
+                continue
+            try:
+                arr = self._record_window(2.0)
+            except Exception as e:
+                self.after(0, lambda e=e: self._set_status(f"Wake mic error: {e}"))
+                break
+            if self._rms(arr) < 350:   # cheap gate: skip transcribing near-silence
+                continue
+            try:
+                self._write_wav(arr, win)
+                txt = (AudioTranscriber.transcribe(win, wmodel) or "").lower()
+            except Exception:
+                txt = ""
+            if any(k in txt for k in self.WAKE_KEYS) and not self._wake_stop.is_set():
+                self._busy = True   # block manual input during capture + turn
+                self.after(0, lambda: self._set_status("Yes? Listening…"))
+                cmd = None
+                try:
+                    cmd = self._capture_command()
+                except Exception as e:
+                    print(f"wake capture error: {e}")
+                if cmd and not self._wake_stop.is_set():
+                    self.after(0, lambda c=cmd: self._process(c))
+                    while self._busy and not self._wake_stop.is_set():
+                        self._wake_stop.wait(0.2)   # wait out the turn
+                else:
+                    self._busy = False
+                if not self._wake_stop.is_set():
+                    self.after(0, lambda: self._set_status("Listening for “Hey Ajax”…"))
+        self.after(0, lambda: (self.wake_btn.configure(text="👂 WAKE: OFF"),
+                               self._set_status("Wake word off.")))
 
     def _toggle_talk(self):
         if self._busy:
@@ -18309,7 +18457,7 @@ class VoiceAgentDialog(ctk.CTkToplevel):
                 if not reply:
                     raise RuntimeError("empty reply from Ollama")
                 self.messages.append({"role": "assistant", "content": reply})
-                self.after(0, lambda: self._append("Paragon", reply))
+                self.after(0, lambda: self._append(self.AGENT_NAME, reply))
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
 
