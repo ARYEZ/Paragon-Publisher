@@ -13941,6 +13941,20 @@ class MusicLibraryDialog(ctk.CTkToplevel):
             except Exception:
                 pass
 
+        def _set_prog(txt):
+            # Safe against the dialog being closed mid-run (worker threads post
+            # updates via self.after; the label may already be destroyed).
+            try:
+                prog.configure(text=txt)
+            except Exception:
+                pass
+
+        def _enable_gen():
+            try:
+                gen_btn.configure(state="normal")
+            except Exception:
+                pass
+
         def _fmt_mmss(sec):
             sec = int(max(0, sec))
             return f"{sec // 60}:{sec % 60:02d}"
@@ -14001,20 +14015,20 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                 epn = ep['episode']
                 plot, src = "", ""
                 if source == "Online":
-                    self.after(0, lambda i=i: prog.configure(text=f"Searching… {i}/{n}"))
+                    self.after(0, lambda i=i: _set_prog(f"Searching… {i}/{n}"))
                     try:
                         plot, src = RadioDramaPlotFinder.find(series, ep['title'])
                     except Exception as e:
                         print(f"plot find error: {e}")
                 else:
                     self.after(0, lambda i=i, epn=epn: (
-                        prog.configure(text=f"Transcribing E{epn:02d}… ({i}/{n})"), _set_bar(0)))
+                        _set_prog(f"Transcribing E{epn:02d}… ({i}/{n})"), _set_bar(0)))
 
                     def _tp(cur, total, i=i, epn=epn):
                         frac = (cur / total) if total else 0.0
-                        self.after(0, lambda: (prog.configure(
-                            text=f"Transcribing E{epn:02d} ({i}/{n}) — "
-                                 f"{_fmt_mmss(cur)} / {_fmt_mmss(total)} ({int(frac * 100)}%)"),
+                        self.after(0, lambda: (_set_prog(
+                            f"Transcribing E{epn:02d} ({i}/{n}) — "
+                            f"{_fmt_mmss(cur)} / {_fmt_mmss(total)} ({int(frac * 100)}%)"),
                             _set_bar(frac)))
 
                     transcript = ""
@@ -14027,7 +14041,7 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                         err = f"{type(e).__name__}: {e}"
                         print(f"transcribe error on {ep['file']}: {err}")
                     if transcript:
-                        self.after(0, lambda i=i, epn=epn: prog.configure(text=f"Summarizing E{epn:02d}… ({i}/{n})"))
+                        self.after(0, lambda i=i, epn=epn: _set_prog(f"Summarizing E{epn:02d}… ({i}/{n})"))
                         try:
                             if summ == "Ollama":
                                 plot = PlotSummarizer.ollama(transcript, series, ep['title'], ourl, omodel)
@@ -14048,19 +14062,19 @@ class MusicLibraryDialog(ctk.CTkToplevel):
                     found += 1
                 self.after(0, lambda ep=ep, plot=plot, src=src: _apply_row(ep, plot, src))
             gen_state["running"] = False
-            self.after(0, lambda: (prog.configure(
-                text=f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
-                _set_bar(1.0), gen_btn.configure(state="normal")))
+            self.after(0, lambda: (_set_prog(
+                f"Done — {found}/{n} filled. Review/edit, then Write NFOs."),
+                _set_bar(1.0), _enable_gen()))
 
         def _test_ollama():
             u = ollama_url_e.get().strip() or "http://localhost:11434"
             m = ollama_model_e.get().strip() or "llama3.1"
-            prog.configure(text="Testing Ollama…")
+            _set_prog("Testing Ollama…")
 
             def run():
                 ok, msg = PlotSummarizer.check_ollama(u, m)
                 def show():
-                    prog.configure(text="Ollama ✓" if ok else "Ollama test failed")
+                    _set_prog("Ollama ✓" if ok else "Ollama test failed")
                     (messagebox.showinfo if ok else messagebox.showwarning)(
                         "Ollama Test", msg, parent=dlg)
                 self.after(0, show)
