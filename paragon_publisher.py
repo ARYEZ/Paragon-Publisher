@@ -2906,8 +2906,30 @@ def _play_wav_async(path):
     return False
 
 
+def _play_wav_sync(path):
+    """Play a wav and BLOCK until it finishes (so clips can be queued back to
+    back without overlapping). Best-effort, cross-platform."""
+    try:
+        if sys.platform.startswith("win"):
+            import winsound
+            winsound.PlaySound(path, winsound.SND_FILENAME)  # blocking (no ASYNC)
+            return True
+    except Exception:
+        pass
+    try:
+        import shutil, subprocess
+        for player in (["afplay"], ["aplay", "-q"], ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]):
+            if shutil.which(player[0]):
+                subprocess.run(player + [path],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _stop_wav():
-    """Stop any wav started by _play_wav_async (Windows)."""
+    """Stop any wav started by _play_wav_async / _play_wav_sync (Windows)."""
     try:
         if sys.platform.startswith("win"):
             import winsound
@@ -2982,6 +3004,37 @@ def ollama_chat(messages, url="http://localhost:11434", model="llama3.1", timeou
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = json.loads(r.read().decode("utf-8", "replace"))
     return (data.get("message", {}).get("content") or "").strip()
+
+
+def ollama_chat_stream(messages, url="http://localhost:11434", model="llama3.1",
+                       on_delta=None, timeout=180):
+    """Stream a chat reply from Ollama. Calls on_delta(text) for each token chunk
+    as it arrives and returns the full reply text."""
+    body = json.dumps({"model": model, "messages": messages,
+                       "stream": True}).encode("utf-8")
+    req = urllib.request.Request(url.rstrip("/") + "/api/chat", data=body,
+                                 headers={"Content-Type": "application/json"})
+    parts = []
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        for raw in r:                      # Ollama streams newline-delimited JSON
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            chunk = (obj.get("message") or {}).get("content") or ""
+            if chunk:
+                parts.append(chunk)
+                if on_delta:
+                    try:
+                        on_delta(chunk)
+                    except Exception:
+                        pass
+            if obj.get("done"):
+                break
+    return "".join(parts).strip()
 
 
 class NFOGenerator:
@@ -18179,26 +18232,89 @@ class VoiceAgentDialog(ctk.CTkToplevel):
                     agent_voice=mode, agent_speaker_wav=self.sample_e.get().strip())
 
         def run():
+            import queue, tempfile
+            tmp = tempfile.gettempdir()
             err = None
-            heard = reply = ""
+            # Pipeline: ollama stream -> sentences -> synth_q -> (synth) -> play_q -> (play)
+            synth_q = queue.Queue()
+            play_q = queue.Queue()
+            spoke = {"started": False}
+
+            def synth_worker():
+                i = 0
+                while True:
+                    sent = synth_q.get()
+                    if sent is None:
+                        play_q.put(None)
+                        synth_q.task_done()
+                        break
+                    try:
+                        out = os.path.join(tmp, f"paragon_agent_out_{i % 6}.wav")
+                        i += 1
+                        TTSNarrator.synthesize(sent, out_path=out, engine=engine,
+                                               speaker=builtin, speaker_wav=speaker_wav,
+                                               exaggeration=exaggeration)
+                        play_q.put(out)
+                    except Exception as e:
+                        print(f"agent TTS error: {e}")
+                    finally:
+                        synth_q.task_done()
+
+            def play_worker():
+                while True:
+                    w = play_q.get()
+                    if w is None:
+                        play_q.task_done()
+                        break
+                    if not spoke["started"]:
+                        spoke["started"] = True
+                        self.after(0, lambda: self._set_status("Speaking…"))
+                    try:
+                        _play_wav_sync(w)   # blocks until this clip finishes
+                    except Exception as e:
+                        print(f"agent play error: {e}")
+                    finally:
+                        play_q.task_done()
+
+            st = threading.Thread(target=synth_worker, daemon=True)
+            pt = threading.Thread(target=play_worker, daemon=True)
+            st.start(); pt.start()
+
+            # Split the streaming text into speakable sentences as it arrives.
+            buf = {"s": ""}
+            sent_re = re.compile(r'(.+?[.!?…])(\s+|$)', re.S)
+
+            def feed(chunk):
+                buf["s"] += chunk
+                while True:
+                    m = sent_re.match(buf["s"])
+                    if not m:
+                        break
+                    sentence = m.group(1).strip()
+                    buf["s"] = buf["s"][m.end():]
+                    if len(sentence) >= 2:
+                        synth_q.put(sentence)
+
+            reply = ""
             try:
                 heard = (AudioTranscriber.transcribe(wav, wmodel) or "").strip()
                 if not heard:
                     raise RuntimeError("no speech detected")
                 self.after(0, lambda: (self._append("You", heard), self._set_status("Thinking…")))
                 self.messages.append({"role": "user", "content": heard})
-                reply = ollama_chat(self.messages, url, model)
+                reply = ollama_chat_stream(self.messages, url, model, on_delta=feed)
+                tail = buf["s"].strip()
+                if tail:
+                    synth_q.put(tail)          # flush any text with no final punctuation
                 if not reply:
                     raise RuntimeError("empty reply from Ollama")
                 self.messages.append({"role": "assistant", "content": reply})
-                self.after(0, lambda: (self._append("Paragon", reply), self._set_status("Speaking…")))
-                out = os.path.join(__import__("tempfile").gettempdir(), "paragon_agent_out.wav")
-                TTSNarrator.synthesize(reply, out_path=out, engine=engine,
-                                       speaker=builtin, speaker_wav=speaker_wav,
-                                       exaggeration=exaggeration)
-                _play_wav_async(out)
+                self.after(0, lambda: self._append("Paragon", reply))
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
+
+            synth_q.put(None)       # tell the pipeline no more sentences are coming
+            pt.join()               # wait until everything has finished speaking
 
             def done():
                 self._busy = False
