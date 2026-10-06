@@ -2699,6 +2699,7 @@ class TTSNarrator:
     _device = None
     _proc = None          # persistent worker subprocess (model stays warm in VRAM)
     _proc_py = None       # the interpreter the worker was started with
+    _proc_engine = None   # the engine the worker was started with
     _proc_lock = threading.Lock()
     LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
                  "cs", "ar", "zh-cn", "ja", "hu", "ko", "hi"]
@@ -2738,19 +2739,19 @@ class TTSNarrator:
         return bool(py and os.path.isfile(py) and os.path.isfile(TTSNarrator._worker()))
 
     @staticmethod
-    def check():
-        """Return (ok, message): can the side env import torch + TTS?"""
+    def check(engine="xtts"):
+        """Return (ok, message): can the side env import torch + the engine pkg?"""
         py = TTSNarrator._python()
         if not py or not os.path.isfile(py):
             return False, ("Set 'TTS Python' to the python.exe of a Python 3.11–3.13\n"
-                           "environment that has torch + coqui-tts installed.")
+                           "environment that has torch + the TTS engine installed.")
         worker = TTSNarrator._worker()
         if not os.path.isfile(worker):
             return False, f"Worker script is missing:\n{worker}"
         import subprocess
         try:
-            p = subprocess.run([py, worker, "--check"], capture_output=True,
-                               text=True, timeout=180)
+            p = subprocess.run([py, worker, "--check", "--engine", engine],
+                               capture_output=True, text=True, timeout=180)
         except Exception as e:
             return False, f"Couldn't run that Python:\n{e}"
         if p.returncode == 0:
@@ -2775,21 +2776,23 @@ class TTSNarrator:
         return None
 
     @staticmethod
-    def _ensure_proc():
-        """Start (or reuse) the persistent worker; it loads XTTS once and keeps
-        it warm in VRAM. Returns the live process. Raises on startup failure."""
+    def _ensure_proc(engine="xtts"):
+        """Start (or reuse) the persistent worker for `engine`; it loads the model
+        once and keeps it warm in VRAM. Restarts if the interpreter or engine
+        changed. Returns the live process. Raises on startup failure."""
         import subprocess
         proc = TTSNarrator._proc
         py = TTSNarrator._python()
-        if proc is not None and proc.poll() is None and TTSNarrator._proc_py == py:
+        if (proc is not None and proc.poll() is None
+                and TTSNarrator._proc_py == py and TTSNarrator._proc_engine == engine):
             return proc
-        TTSNarrator._kill()  # dead, or the interpreter changed — restart
+        TTSNarrator._kill()  # dead, or the interpreter/engine changed — restart
         worker = TTSNarrator._worker()
         if not (py and os.path.isfile(py)):
             raise RuntimeError("TTS Python is not configured (set it in the Narration panel).")
         if not os.path.isfile(worker):
             raise RuntimeError(f"Worker script is missing:\n{worker}")
-        proc = subprocess.Popen([py, worker, "--serve"],
+        proc = subprocess.Popen([py, worker, "--serve", "--engine", engine],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1)
 
@@ -2808,6 +2811,7 @@ class TTSNarrator:
             raise RuntimeError(err)
         TTSNarrator._proc = proc
         TTSNarrator._proc_py = py
+        TTSNarrator._proc_engine = engine
         TTSNarrator._device = data.get("device")
         spk = data.get("speakers")
         if spk:
@@ -2822,6 +2826,7 @@ class TTSNarrator:
         proc = TTSNarrator._proc
         TTSNarrator._proc = None
         TTSNarrator._proc_py = None
+        TTSNarrator._proc_engine = None
         if proc is not None:
             try:
                 if proc.stdin:
@@ -2835,11 +2840,12 @@ class TTSNarrator:
 
     @staticmethod
     def synthesize(text, speaker_wav=None, language="en", out_path=None, speaker=None,
-                   temperature=None, speed=None, split=None):
+                   temperature=None, speed=None, split=None, engine="xtts",
+                   exaggeration=None, cfg=None):
         """Render `text` to a wav via the persistent worker (model stays warm).
-        Use `speaker` for a built-in XTTS voice, or `speaker_wav` to clone a
-        sample. temperature/speed/split are optional XTTS quality knobs. Raises
-        RuntimeError on failure."""
+        `engine` is 'xtts' or 'chatterbox'. Use `speaker` for a built-in XTTS
+        voice, or `speaker_wav` to clone a sample. temperature/speed/split are
+        XTTS knobs; exaggeration/cfg are Chatterbox knobs. Raises on failure."""
         import tempfile
         if not out_path:
             out_path = os.path.join(tempfile.gettempdir(), "paragon_tts_preview.wav")
@@ -2852,12 +2858,16 @@ class TTSNarrator:
             payload["speed"] = speed
         if split is not None:
             payload["split"] = bool(split)
+        if exaggeration is not None:
+            payload["exaggeration"] = exaggeration
+        if cfg is not None:
+            payload["cfg"] = cfg
         req = json.dumps(payload)
         with TTSNarrator._proc_lock:
             data = None
             for attempt in (1, 2):  # restart the worker once if the pipe is dead
                 try:
-                    proc = TTSNarrator._ensure_proc()
+                    proc = TTSNarrator._ensure_proc(engine)
                     proc.stdin.write(req + "\n")
                     proc.stdin.flush()
                     data = TTSNarrator._read_json(proc)
@@ -17620,15 +17630,31 @@ class NarrationDialog(ctk.CTkToplevel):
         ParagonButton(r0, text="TEST", width=80, height=38,
                       command=self._test_env).pack(side="left")
 
-        # Voice selector: a built-in XTTS voice, or "Clone from sample"
+        # Engine selector: XTTS (built-in voices + clone) or Chatterbox (MIT, fast)
         self.CLONE_LABEL = "Clone from sample"
-        speakers = pconfig_get("tts_speakers", None) or TTSNarrator.DEFAULT_SPEAKERS
+        self.DEFAULT_LABEL = "Default voice"
+        rE = ctk.CTkFrame(inner, fg_color="transparent"); rE.pack(fill="x", padx=16, pady=4)
+        ParagonLabel(rE, text="Engine", style="muted", width=110, anchor="w").pack(side="left")
+        self.engine_var = ctk.StringVar(value=pconfig_get("tts_engine", "XTTS"))
+        ParagonOptionMenu(rE, values=["XTTS", "Chatterbox"], variable=self.engine_var,
+                          width=150, command=self._on_engine_change).pack(side="left", padx=(4, 0))
+
+        # Voice selector: a built-in voice, or "Clone from sample"
         rV = ctk.CTkFrame(inner, fg_color="transparent"); rV.pack(fill="x", padx=16, pady=4)
         ParagonLabel(rV, text="Voice", style="muted", width=110, anchor="w").pack(side="left")
-        self.voice_var = ctk.StringVar(value=pconfig_get("tts_voice", speakers[0] if speakers else self.CLONE_LABEL))
-        ParagonOptionMenu(rV, values=[self.CLONE_LABEL] + list(speakers),
-                          variable=self.voice_var, width=260,
-                          command=self._on_voice_mode).pack(side="left", padx=(4, 0))
+        self.voice_var = ctk.StringVar(value=pconfig_get("tts_voice", ""))
+        self.voice_menu = ParagonOptionMenu(rV, values=self._voice_options(),
+                                            variable=self.voice_var, width=260,
+                                            command=self._on_voice_mode)
+        self.voice_menu.pack(side="left", padx=(4, 0))
+        # Make sure the stored/initial voice is valid for the current engine;
+        # default to a ready-made voice (so it works without a sample).
+        _opts = self._voice_options()
+        if self.voice_var.get() not in _opts:
+            if self.engine_var.get().lower() == "chatterbox":
+                self.voice_var.set(self.DEFAULT_LABEL)
+            else:
+                self.voice_var.set(_opts[1] if len(_opts) > 1 else _opts[0])
 
         # Voice sample row (only used when "Clone from sample" is selected)
         r1 = ctk.CTkFrame(inner, fg_color="transparent"); r1.pack(fill="x", padx=16, pady=4)
@@ -17682,10 +17708,31 @@ class NarrationDialog(ctk.CTkToplevel):
         if not TTSNarrator.available():
             self.status.configure(text="⚠ Set 'TTS Python' to your 3.11–3.13 env — press TEST to verify.")
 
+    def _voice_options(self):
+        """Voice dropdown choices for the current engine."""
+        if self.engine_var.get().lower() == "chatterbox":
+            return [self.DEFAULT_LABEL, self.CLONE_LABEL]
+        speakers = pconfig_get("tts_speakers", None) or TTSNarrator.DEFAULT_SPEAKERS
+        return [self.CLONE_LABEL] + list(speakers)
+
+    def _on_engine_change(self, value=None):
+        opts = self._voice_options()
+        try:
+            self.voice_menu.configure(values=opts)
+        except Exception:
+            pass
+        if self.voice_var.get() not in opts:
+            self.voice_var.set(opts[0])
+        self._on_voice_mode()
+
     def _on_voice_mode(self, value=None):
-        cloning = (self.voice_var.get() == self.CLONE_LABEL)
-        self.status.configure(
-            text="" if cloning else f"Built-in voice: {self.voice_var.get()}")
+        v = self.voice_var.get()
+        if v in (self.CLONE_LABEL,):
+            self.status.configure(text="")
+        elif v == self.DEFAULT_LABEL:
+            self.status.configure(text="Chatterbox default voice")
+        else:
+            self.status.configure(text=f"Built-in voice: {v}")
 
     def _browse_voice(self):
         path = filedialog.askopenfilename(
@@ -17710,28 +17757,31 @@ class NarrationDialog(ctk.CTkToplevel):
         py = self.pyexe_e.get().strip()
         if py:
             pconfig_set(tts_python=py)
-        self.status.configure(text="Testing TTS environment…")
+        engine = "chatterbox" if self.engine_var.get().lower() == "chatterbox" else "xtts"
+        self.status.configure(text=f"Testing {self.engine_var.get()} environment…")
 
         def run():
-            ok, msg = TTSNarrator.check()
+            ok, msg = TTSNarrator.check(engine)
+            pkg = "chatterbox-tts" if engine == "chatterbox" else "coqui-tts"
 
             def show():
                 self.status.configure(text="TTS env ✓" if ok else "TTS env not ready")
                 if ok:
                     messagebox.showinfo(
                         "TTS Environment",
-                        "Voice cloning is ready.\n\n" + msg + "\n\n"
+                        "Voice engine is ready.\n\n" + msg + "\n\n"
                         "(device=cuda means it will run on your GPU.)", parent=self)
                 else:
                     messagebox.showwarning(
                         "TTS Environment",
                         msg + "\n\nSet up the side env (one time), e.g.:\n"
                         "  py -3.12 -m venv C:\\ttsenv\n"
-                        "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
                         "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
                         "      --index-url https://download.pytorch.org/whl/cu121\n"
-                        "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n\n"
-                        "Then point 'TTS Python' at:\n"
+                        f"  C:\\ttsenv\\Scripts\\pip install {pkg}\n"
+                        + ("  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n"
+                           if engine == "xtts" else "")
+                        + "\nThen point 'TTS Python' at:\n"
                         "  C:\\ttsenv\\Scripts\\python.exe", parent=self)
             try:
                 self.after(0, show)
@@ -17768,29 +17818,42 @@ class NarrationDialog(ctk.CTkToplevel):
         text = self.text.get("1.0", "end").strip()
         lang = self.lang_var.get().strip() or "en"
         mode = self.voice_var.get()
+        engine = "chatterbox" if self.engine_var.get().lower() == "chatterbox" else "xtts"
         if not text:
             messagebox.showwarning("No text", "Type some text to narrate.", parent=self)
             return
-        builtin = "" if mode == self.CLONE_LABEL else mode
-        speaker_wav = ""
-        if not builtin:
+
+        # Resolve the voice selection per engine
+        builtin = ""        # XTTS named studio voice
+        speaker_wav = ""    # clone reference clip
+        if mode == self.CLONE_LABEL:
             speaker_wav = self.voice_e.get().strip()
             if not speaker_wav or not os.path.isfile(speaker_wav):
                 messagebox.showwarning(
-                    "No voice selected",
-                    "Pick a built-in Voice, or choose 'Clone from sample' and Browse "
-                    "to a voice clip.", parent=self)
+                    "No voice sample",
+                    "Choose 'Clone from sample' and Browse to a voice clip, or pick a "
+                    "built-in voice.", parent=self)
                 return
-        temperature = self.EXPR_TEMP.get(self.expr_var.get(), 0.65)
+        elif engine == "xtts":
+            builtin = mode   # a named XTTS studio voice
+        # (Chatterbox + Default voice → both empty → worker uses its default voice)
+
+        # Quality knobs, mapped per engine
+        expr = self.expr_var.get()
         try:
             speed = float(self.speed_var.get())
         except Exception:
             speed = 1.0
         split = bool(self.split_var.get())
+        temperature = exaggeration = None
+        if engine == "chatterbox":
+            exaggeration = {"Stable": 0.3, "Balanced": 0.5, "Expressive": 0.8}.get(expr, 0.5)
+            speed = split = None   # not applicable to Chatterbox
+        else:
+            temperature = self.EXPR_TEMP.get(expr, 0.65)
         pconfig_set(tts_speaker_wav=self.voice_e.get().strip(),
-                    tts_language=lang, tts_voice=mode,
-                    tts_expr=self.expr_var.get(), tts_speed=self.speed_var.get(),
-                    tts_split=split)
+                    tts_language=lang, tts_voice=mode, tts_engine=self.engine_var.get(),
+                    tts_expr=expr, tts_speed=self.speed_var.get(), tts_split=bool(self.split_var.get()))
         self._busy = True
         try:
             self.speak_btn.configure(state="disabled")
@@ -17807,7 +17870,8 @@ class NarrationDialog(ctk.CTkToplevel):
                 out = TTSNarrator.synthesize(text, speaker_wav=speaker_wav,
                                              language=lang, speaker=builtin,
                                              temperature=temperature, speed=speed,
-                                             split=split)
+                                             split=split, engine=engine,
+                                             exaggeration=exaggeration)
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
 

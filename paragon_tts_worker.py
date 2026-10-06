@@ -14,6 +14,9 @@ Set up the side environment once, e.g. with Python 3.12:
     C:\\ttsenv\\Scripts\\pip install "transformers<5"   # XTTS needs the 4.x API (isin_mps_friendly)
     # (nvidia-cublas-cu12 / nvidia-cudnn-cu12 are pulled in by torch's CUDA build)
 
+    # For the Chatterbox engine (MIT, faster) add:
+    C:\\ttsenv\\Scripts\\pip install chatterbox-tts
+
 Then point Paragon's Narration panel at:  C:\\ttsenv\\Scripts\\python.exe
 
 Usage:
@@ -77,16 +80,68 @@ def _builtin_speakers(model):
         return []
 
 
-def serve(model_name=XTTS_MODEL):
-    """Persistent mode: load XTTS once, then read one JSON request per line from
-    stdin and reply with one JSON line on stdout. All library chatter is routed
-    to stderr so stdout carries only the JSON protocol.
+def _synth_chatterbox(model, req, out):
+    """Synthesize one request with Chatterbox and save to `out`."""
+    import torchaudio as ta
+    text = (req.get("text") or "").strip()
+    spk_wav = (req.get("speaker_wav") or "").strip()
+    gkw = {}
+    if spk_wav and os.path.isfile(spk_wav):
+        gkw["audio_prompt_path"] = spk_wav   # clone; omitted => built-in default voice
+    if req.get("temperature") is not None:
+        gkw["temperature"] = float(req["temperature"])
+    if req.get("exaggeration") is not None:
+        gkw["exaggeration"] = float(req["exaggeration"])
+    if req.get("cfg") is not None:
+        gkw["cfg_weight"] = float(req["cfg"])
+    try:
+        wav = model.generate(text, **gkw)
+    except TypeError:
+        wav = model.generate(text, **{k: v for k, v in gkw.items()
+                                      if k in ("audio_prompt_path",)})
+    try:
+        wav = wav.detach().cpu()
+    except Exception:
+        pass
+    if hasattr(wav, "dim") and wav.dim() == 1:
+        wav = wav.unsqueeze(0)
+    ta.save(out, wav, model.sr)
 
-    Request:  {"text": "...", "speaker": "voice.wav", "language": "en", "out": "out.wav"}
-              {"cmd": "quit"}
-    Reply:    {"ready": true, "device": "cuda"}  (once, at startup)
-              {"ok": true, "device": "cuda", "out": "out.wav"}  (per request)
-              {"ok": false, "error": "..."}"""
+
+def _synth_xtts(model, req, out):
+    """Synthesize one request with XTTS and save to `out`."""
+    text = (req.get("text") or "").strip()
+    builtin = (req.get("speaker") or "").strip()      # built-in voice name
+    spk_wav = (req.get("speaker_wav") or "").strip()  # clone reference clip
+    lang = req.get("language") or "en"
+    kwargs = {"text": text, "language": lang, "file_path": out}
+    if builtin:
+        kwargs["speaker"] = builtin
+    elif os.path.isfile(spk_wav):
+        kwargs["speaker_wav"] = spk_wav
+    else:
+        raise ValueError("no built-in voice selected and no valid sample")
+    extra = {}
+    if req.get("temperature") is not None:
+        extra["temperature"] = float(req["temperature"])
+    if req.get("speed") is not None:
+        extra["speed"] = float(req["speed"])
+    if req.get("split") is not None:
+        extra["enable_text_splitting"] = bool(req["split"])
+    try:
+        model.tts_to_file(**kwargs, **extra)
+    except TypeError:
+        model.tts_to_file(**kwargs)   # older coqui-tts: drop unsupported kwargs
+
+
+def serve(engine="xtts", model_name=XTTS_MODEL):
+    """Persistent mode: load the chosen engine once, then read one JSON request
+    per line from stdin and reply with one JSON line on stdout. All library
+    chatter is routed to stderr so stdout carries only the JSON protocol.
+
+    Reply:  {"ready": true, "device": "cuda", "engine": "...", "speakers": [...]}
+            {"ok": true, "device": "cuda", "out": "out.wav"}  (per request)
+            {"ok": false, "error": "..."}"""
     import json as _json
     _add_cuda_dll_dirs()
     real_out = sys.stdout
@@ -105,19 +160,26 @@ def serve(model_name=XTTS_MODEL):
     except Exception as e:
         respond({"ready": False, "error": f"PyTorch not available: {e}"})
         return 3
+
+    speakers = []
     try:
-        _allowlist_xtts()
-        from TTS.api import TTS as _TTS
-        model = _TTS(model_name)
-        try:
-            model = model.to(dev)
-        except Exception:
-            dev = "cpu"
+        if engine == "chatterbox":
+            from chatterbox.tts import ChatterboxTTS
+            model = ChatterboxTTS.from_pretrained(device=dev)
+        else:
+            _allowlist_xtts()
+            from TTS.api import TTS as _TTS
+            model = _TTS(model_name)
+            try:
+                model = model.to(dev)
+            except Exception:
+                dev = "cpu"
+            speakers = _builtin_speakers(model)
     except Exception as e:
         respond({"ready": False, "error": f"{type(e).__name__}: {e}"})
         return 1
 
-    respond({"ready": True, "device": dev, "speakers": _builtin_speakers(model)})
+    respond({"ready": True, "device": dev, "engine": engine, "speakers": speakers})
 
     for line in sys.stdin:
         line = line.strip()
@@ -131,35 +193,15 @@ def serve(model_name=XTTS_MODEL):
         if req.get("cmd") == "quit":
             break
         try:
-            text = (req.get("text") or "").strip()
-            builtin = (req.get("speaker") or "").strip()      # built-in voice name
-            spk_wav = (req.get("speaker_wav") or "").strip()  # clone reference clip
-            out = req.get("out") or ""
-            lang = req.get("language") or "en"
-            if not text:
+            if not (req.get("text") or "").strip():
                 raise ValueError("empty text")
+            out = req.get("out") or ""
             if not out:
                 raise ValueError("no output path")
-            kwargs = {"text": text, "language": lang, "file_path": out}
-            if builtin:
-                kwargs["speaker"] = builtin
-            elif os.path.isfile(spk_wav):
-                kwargs["speaker_wav"] = spk_wav
+            if engine == "chatterbox":
+                _synth_chatterbox(model, req, out)
             else:
-                raise ValueError("no built-in voice selected and no valid sample")
-            # Optional quality knobs (XTTS inference params)
-            extra = {}
-            if req.get("temperature") is not None:
-                extra["temperature"] = float(req["temperature"])
-            if req.get("speed") is not None:
-                extra["speed"] = float(req["speed"])
-            if req.get("split") is not None:
-                extra["enable_text_splitting"] = bool(req["split"])
-            try:
-                model.tts_to_file(**kwargs, **extra)
-            except TypeError:
-                # Older coqui-tts may not accept some kwargs — fall back to defaults.
-                model.tts_to_file(**kwargs)
+                _synth_xtts(model, req, out)
             respond({"ok": True, "device": dev, "out": out})
         except Exception as e:
             respond({"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -172,6 +214,8 @@ def main():
                     help="verify torch + TTS import and print the device")
     ap.add_argument("--serve", action="store_true",
                     help="persistent mode: keep the model loaded and take JSON requests on stdin")
+    ap.add_argument("--engine", default="xtts", choices=["xtts", "chatterbox"],
+                    help="which TTS engine to load")
     ap.add_argument("--text-file", help="UTF-8 file with the text to narrate")
     ap.add_argument("--speaker", help="reference voice clip (wav/mp3) to clone")
     ap.add_argument("--language", default="en")
@@ -180,7 +224,7 @@ def main():
     a = ap.parse_args()
 
     if a.serve:
-        return serve(a.model)
+        return serve(a.engine, a.model)
 
     _add_cuda_dll_dirs()
 
@@ -193,11 +237,15 @@ def main():
 
     if a.check:
         try:
-            import TTS  # noqa: F401
+            if a.engine == "chatterbox":
+                import chatterbox  # noqa: F401
+            else:
+                import TTS  # noqa: F401
         except Exception as e:
-            print(f"ERROR: coqui-tts not available: {e}", file=sys.stderr)
+            pkg = "chatterbox-tts" if a.engine == "chatterbox" else "coqui-tts"
+            print(f"ERROR: {pkg} not available: {e}", file=sys.stderr)
             return 4
-        print(f"OK device={dev} torch={torch.__version__}")
+        print(f"OK device={dev} engine={a.engine} torch={torch.__version__}")
         return 0
 
     if not (a.text_file and a.speaker and a.out):
