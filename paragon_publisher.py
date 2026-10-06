@@ -17708,6 +17708,19 @@ class NarrationDialog(ctk.CTkToplevel):
         if not TTSNarrator.available():
             self.status.configure(text="⚠ Set 'TTS Python' to your 3.11–3.13 env — press TEST to verify.")
 
+    def _setup_steps(self, engine):
+        """One-time side-env setup commands for the given engine."""
+        if engine == "chatterbox":
+            return ("  py -3.12 -m venv C:\\ttsenv\n"
+                    "  C:\\ttsenv\\Scripts\\pip install chatterbox-tts\n"
+                    "  C:\\ttsenv\\Scripts\\pip install torch==2.6.0 torchaudio==2.6.0 \\\n"
+                    "      --index-url https://download.pytorch.org/whl/cu124\n")
+        return ("  py -3.12 -m venv C:\\ttsenv\n"
+                "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
+                "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
+                "      --index-url https://download.pytorch.org/whl/cu121\n"
+                "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n")
+
     def _voice_options(self):
         """Voice dropdown choices for the current engine."""
         if self.engine_var.get().lower() == "chatterbox":
@@ -17774,13 +17787,8 @@ class NarrationDialog(ctk.CTkToplevel):
                 else:
                     messagebox.showwarning(
                         "TTS Environment",
-                        msg + "\n\nSet up the side env (one time), e.g.:\n"
-                        "  py -3.12 -m venv C:\\ttsenv\n"
-                        "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
-                        "      --index-url https://download.pytorch.org/whl/cu121\n"
-                        f"  C:\\ttsenv\\Scripts\\pip install {pkg}\n"
-                        + ("  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n"
-                           if engine == "xtts" else "")
+                        msg + "\n\nSet up the side env (one time):\n"
+                        + self._setup_steps(engine)
                         + "\nThen point 'TTS Python' at:\n"
                         "  C:\\ttsenv\\Scripts\\python.exe", parent=self)
             try:
@@ -17800,20 +17808,14 @@ class NarrationDialog(ctk.CTkToplevel):
         if pyexe:
             pconfig_set(tts_python=pyexe)
         if not TTSNarrator.available():
-            _is_cb = (self.engine_var.get().lower() == "chatterbox")
-            _pkg = "chatterbox-tts" if _is_cb else "coqui-tts"
-            _extra = "" if _is_cb else "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n"
+            _eng = "chatterbox" if self.engine_var.get().lower() == "chatterbox" else "xtts"
             messagebox.showinfo(
                 "TTS environment not set",
                 "This voice engine needs PyTorch, which has no wheels for\n"
                 "Python 3.14 — so Paragon runs it in a side Python 3.11–3.13.\n\n"
                 "Set it up once (example with Python 3.12):\n"
-                "  py -3.12 -m venv C:\\ttsenv\n"
-                "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
-                "      --index-url https://download.pytorch.org/whl/cu121\n"
-                f"  C:\\ttsenv\\Scripts\\pip install {_pkg}\n"
-                f"{_extra}\n"
-                "Then set 'TTS Python' above to:\n"
+                + self._setup_steps(_eng)
+                + "\nThen set 'TTS Python' above to:\n"
                 "  C:\\ttsenv\\Scripts\\python.exe\n\n"
                 "Press TEST to verify. The model downloads on first use.",
                 parent=self)

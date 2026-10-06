@@ -14,8 +14,11 @@ Set up the side environment once, e.g. with Python 3.12:
     C:\\ttsenv\\Scripts\\pip install "transformers<5"   # XTTS needs the 4.x API (isin_mps_friendly)
     # (nvidia-cublas-cu12 / nvidia-cudnn-cu12 are pulled in by torch's CUDA build)
 
-    # For the Chatterbox engine (MIT, faster) add:
-    C:\\ttsenv\\Scripts\\pip install chatterbox-tts
+    # For the Chatterbox engine (MIT, faster) use a SEPARATE venv (it needs
+    # transformers 5 and torch==2.6.0, which conflict with XTTS):
+    py -3.12 -m venv C:\\cbenv
+    C:\\cbenv\\Scripts\\pip install chatterbox-tts
+    C:\\cbenv\\Scripts\\pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 Then point Paragon's Narration panel at:  C:\\ttsenv\\Scripts\\python.exe
 
