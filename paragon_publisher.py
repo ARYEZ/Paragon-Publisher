@@ -17578,7 +17578,8 @@ class NarrationDialog(ctk.CTkToplevel):
                         "  py -3.12 -m venv C:\\ttsenv\n"
                         "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
                         "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
-                        "      --index-url https://download.pytorch.org/whl/cu121\n\n"
+                        "      --index-url https://download.pytorch.org/whl/cu121\n"
+                        "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n\n"
                         "Then point 'TTS Python' at:\n"
                         "  C:\\ttsenv\\Scripts\\python.exe", parent=self)
             try:
@@ -17606,7 +17607,8 @@ class NarrationDialog(ctk.CTkToplevel):
                 "  py -3.12 -m venv C:\\ttsenv\n"
                 "  C:\\ttsenv\\Scripts\\pip install coqui-tts\n"
                 "  C:\\ttsenv\\Scripts\\pip install torch torchaudio \\\n"
-                "      --index-url https://download.pytorch.org/whl/cu121\n\n"
+                "      --index-url https://download.pytorch.org/whl/cu121\n"
+                "  C:\\ttsenv\\Scripts\\pip install \"transformers<5\"\n\n"
                 "Then set 'TTS Python' above to:\n"
                 "  C:\\ttsenv\\Scripts\\python.exe\n\n"
                 "Press TEST to verify. The XTTS model (~2 GB) downloads on first use.",

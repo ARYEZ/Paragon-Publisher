@@ -11,6 +11,7 @@ Set up the side environment once, e.g. with Python 3.12:
     py -3.12 -m venv C:\\ttsenv
     C:\\ttsenv\\Scripts\\pip install coqui-tts
     C:\\ttsenv\\Scripts\\pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+    C:\\ttsenv\\Scripts\\pip install "transformers<5"   # XTTS needs the 4.x API (isin_mps_friendly)
     # (nvidia-cublas-cu12 / nvidia-cudnn-cu12 are pulled in by torch's CUDA build)
 
 Then point Paragon's Narration panel at:  C:\\ttsenv\\Scripts\\python.exe
