@@ -3130,7 +3130,8 @@ class ParagonHomeClient:
 
     @staticmethod
     def parse_state(data):
-        """Pull friendly names out of a /api/state snapshot (defensively)."""
+        """Pull friendly names (and per-device learned IR commands) out of a
+        /api/state snapshot (defensively)."""
         def names(key):
             out = []
             for item in (data.get(key) or []):
@@ -3141,8 +3142,21 @@ class ParagonHomeClient:
                     if nm:
                         out.append(str(nm))
             return out
-        return {"devices": names("devices"), "scenes": names("scenes"),
-                "sequences": names("sequences")}
+        devices = []
+        commanders = []   # devices with learned IR/RF commands (blasters)
+        for item in (data.get("devices") or []):
+            if isinstance(item, str):
+                devices.append(item)
+            elif isinstance(item, dict):
+                nm = item.get("name") or item.get("id")
+                if not nm:
+                    continue
+                devices.append(str(nm))
+                cmds = [str(c) for c in (item.get("commands") or [])]
+                if cmds:
+                    commanders.append({"name": str(nm), "commands": cmds})
+        return {"devices": devices, "scenes": names("scenes"),
+                "sequences": names("sequences"), "commanders": commanders}
 
     def connect(self):
         """Log in (if a PIN is set) and fetch state. Returns (ok, message, info)."""
@@ -3192,6 +3206,16 @@ HOME_TOOLS = [
         "description": "Run a saved multi-step sequence by name.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "send_command",
+        "description": "Send a learned IR/RF remote command (e.g. TV power, volume, "
+                       "input) from a specific blaster/remote device.",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string", "description": "the blaster/remote device "
+                       "that has the command"},
+            "command": {"type": "string", "description": "the exact learned command "
+                        "name, e.g. 'Power', 'Volume Up'"}},
+            "required": ["target", "command"]}}},
 ]
 
 
@@ -3219,6 +3243,12 @@ def exec_home_tool(client, name, args):
         if name == "run_sequence":
             client.action("sequence", name=args.get("name"))
             return f"ok: ran sequence {args.get('name')}"
+        if name == "send_command":
+            tgt, cmd = args.get("target"), args.get("command")
+            if not tgt or not cmd:
+                return "error: send_command needs a target device and a command"
+            client.action("command", target=tgt, name=cmd)
+            return f"ok: sent {cmd} to {tgt}"
         return f"error: unknown tool {name}"
     except Exception as e:
         return f"error: {type(e).__name__}: {e}"
@@ -18370,14 +18400,17 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         if not (info.get("devices") or info.get("scenes") or info.get("sequences")):
             return ""
         lines = ["You can control the smart home using the provided tools. Use a tool when "
-                 "the user asks to change lights, run a scene, or run a sequence, then confirm "
-                 "in one short sentence. Only use names from these lists:"]
+                 "the user asks to change lights, run a scene or sequence, or press a TV/remote "
+                 "button, then confirm in one short sentence. Only use names from these lists:"]
         if info.get("devices"):
             lines.append("Devices/lights: " + ", ".join(info["devices"]))
         if info.get("scenes"):
             lines.append("Scenes: " + ", ".join(info["scenes"]))
         if info.get("sequences"):
             lines.append("Sequences: " + ", ".join(info["sequences"]))
+        for c in info.get("commanders", []):
+            lines.append("Remote '%s' commands (use send_command with this device): %s"
+                         % (c["name"], ", ".join(c["commands"])))
         return "\n".join(lines)
 
     def _agent_voice_options(self):
