@@ -3032,14 +3032,18 @@ def ollama_chat(messages, url="http://localhost:11434", model="llama3.1", timeou
 
 
 def ollama_chat_stream(messages, url="http://localhost:11434", model="llama3.1",
-                       on_delta=None, timeout=180):
+                       on_delta=None, tools=None, timeout=180):
     """Stream a chat reply from Ollama. Calls on_delta(text) for each token chunk
-    as it arrives and returns the full reply text."""
-    body = json.dumps({"model": model, "messages": messages,
-                       "stream": True}).encode("utf-8")
+    and returns (full_text, tool_calls). If `tools` is given and the model decides
+    to call one, tool_calls is a non-empty list (and usually no content streams)."""
+    payload = {"model": model, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url.rstrip("/") + "/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})
     parts = []
+    tool_calls = []
     with urllib.request.urlopen(req, timeout=timeout) as r:
         for raw in r:                      # Ollama streams newline-delimited JSON
             raw = raw.strip()
@@ -3049,7 +3053,8 @@ def ollama_chat_stream(messages, url="http://localhost:11434", model="llama3.1",
                 obj = json.loads(raw)
             except Exception:
                 continue
-            chunk = (obj.get("message") or {}).get("content") or ""
+            msg = obj.get("message") or {}
+            chunk = msg.get("content") or ""
             if chunk:
                 parts.append(chunk)
                 if on_delta:
@@ -3057,9 +3062,161 @@ def ollama_chat_stream(messages, url="http://localhost:11434", model="llama3.1",
                         on_delta(chunk)
                     except Exception:
                         pass
+            tc = msg.get("tool_calls")
+            if tc:
+                tool_calls.extend(tc)
             if obj.get("done"):
                 break
-    return "".join(parts).strip()
+    return "".join(parts).strip(), tool_calls
+
+
+class ParagonHomeClient:
+    """Minimal client for Paragon Home's local HTTP control API (remote.py),
+    which runs in Kodi's service on port 8778 and is gated by a 6-digit PIN."""
+
+    def __init__(self, host, port=8778, pin=""):
+        self.base = f"http://{host}:{int(port)}"
+        self.pin = (pin or "").strip()
+        self._cookie = None
+
+    def _login(self):
+        data = json.dumps({"pin": self.pin}).encode("utf-8")
+        req = urllib.request.Request(self.base + "/api/login", data=data,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            sc = r.headers.get("Set-Cookie", "")
+            self._cookie = sc.split(";", 1)[0] if sc else None
+
+    def _request(self, method, path, payload=None):
+        import urllib.error
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+
+        def _do():
+            hdr = {"Content-Type": "application/json"}
+            if self._cookie:
+                hdr["Cookie"] = self._cookie
+            req = urllib.request.Request(self.base + path, data=data,
+                                         headers=hdr, method=method)
+            with urllib.request.urlopen(req, timeout=15) as r:
+                raw = r.read().decode("utf-8", "replace")
+                return r.status, (json.loads(raw) if raw.strip() else {})
+        try:
+            if self.pin and self._cookie is None:
+                self._login()
+            return _do()
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403) and self.pin:
+                self._login()
+                return _do()
+            raise
+
+    def state(self):
+        return self._request("GET", "/api/state")
+
+    def action(self, action, target=None, value=None, name=None):
+        payload = {"action": action}
+        if target:
+            payload["target"] = target
+        if value is not None:
+            payload["value"] = value
+        if name is not None:
+            payload["name"] = name
+        return self._request("POST", "/api/action", payload)
+
+    @staticmethod
+    def parse_state(data):
+        """Pull friendly names out of a /api/state snapshot (defensively)."""
+        def names(key):
+            out = []
+            for item in (data.get(key) or []):
+                if isinstance(item, str):
+                    out.append(item)
+                elif isinstance(item, dict):
+                    nm = item.get("name") or item.get("id")
+                    if nm:
+                        out.append(str(nm))
+            return out
+        return {"devices": names("devices"), "scenes": names("scenes"),
+                "sequences": names("sequences")}
+
+    def connect(self):
+        """Log in (if a PIN is set) and fetch state. Returns (ok, message, info)."""
+        try:
+            if self.pin:
+                self._login()
+            _, data = self.state()
+            info = ParagonHomeClient.parse_state(data)
+            return True, (f"Connected — {len(info['devices'])} device(s), "
+                          f"{len(info['scenes'])} scene(s), "
+                          f"{len(info['sequences'])} sequence(s)."), info
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}", {}
+
+
+# Smart-home tools exposed to the LLM (mapped onto Paragon Home's /api/action).
+HOME_TOOLS = [
+    {"type": "function", "function": {
+        "name": "set_power",
+        "description": "Turn lights or devices on or off, or toggle them.",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string", "description": "Device/light friendly name "
+                       "(e.g. 'living room'). Omit to affect all."},
+            "state": {"type": "string", "enum": ["on", "off", "toggle"]}},
+            "required": ["state"]}}},
+    {"type": "function", "function": {
+        "name": "set_brightness",
+        "description": "Set the brightness of lights as a percent (0-100).",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string"},
+            "percent": {"type": "integer", "description": "0 to 100"}},
+            "required": ["percent"]}}},
+    {"type": "function", "function": {
+        "name": "set_color",
+        "description": "Set the color of lights by name or hex, e.g. 'red' or '#00ff00'.",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string"},
+            "color": {"type": "string"}},
+            "required": ["color"]}}},
+    {"type": "function", "function": {
+        "name": "run_scene",
+        "description": "Activate a saved lighting scene by name.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "run_sequence",
+        "description": "Run a saved multi-step sequence by name.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]}}},
+]
+
+
+def exec_home_tool(client, name, args):
+    """Execute one tool call against Paragon Home. Returns a short result string
+    (fed back to the model so it can confirm naturally)."""
+    try:
+        if name == "set_power":
+            action = {"on": "on", "off": "off", "toggle": "toggle"}.get(
+                str(args.get("state", "")).lower())
+            if not action:
+                return "error: state must be on, off, or toggle"
+            client.action(action, target=args.get("target"))
+            return f"ok: turned {action} {args.get('target') or 'all'}"
+        if name == "set_brightness":
+            pct = max(0, min(100, int(args.get("percent"))))
+            client.action("brightness", target=args.get("target"), value=pct)
+            return f"ok: brightness {pct}% on {args.get('target') or 'all'}"
+        if name == "set_color":
+            client.action("color", target=args.get("target"), value=args.get("color"))
+            return f"ok: color {args.get('color')} on {args.get('target') or 'all'}"
+        if name == "run_scene":
+            client.action("scene", name=args.get("name"))
+            return f"ok: ran scene {args.get('name')}"
+        if name == "run_sequence":
+            client.action("sequence", name=args.get("name"))
+            return f"ok: ran sequence {args.get('name')}"
+        return f"error: unknown tool {name}"
+    except Exception as e:
+        return f"error: {type(e).__name__}: {e}"
 
 
 class NFOGenerator:
@@ -18065,6 +18222,8 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         self._wake_on = False
         self._wake_stop = threading.Event()
         self._wake_thread = None
+        self._home_client = None
+        self._home_info = {}
         # Load the stored system prompt, migrating the old "Paragon" default to Ajax.
         _sys = pconfig_get("agent_system", "")
         if not _sys or _sys.strip() == self._OLD_DEFAULT_SYSTEM:
@@ -18107,6 +18266,21 @@ class VoiceAgentDialog(ctk.CTkToplevel):
         ParagonButton(rv, text="BROWSE", width=90, height=36,
                       command=self._browse_sample).pack(side="left")
 
+        # Smart Home row: enable + host + PIN + connect (Paragon Home HTTP API)
+        rh = ctk.CTkFrame(inner, fg_color="transparent"); rh.pack(fill="x", padx=16, pady=4)
+        self.home_var = ctk.BooleanVar(value=bool(pconfig_get("agent_home_enabled", False)))
+        ParagonGradientCheckbox(rh, text="Smart home", variable=self.home_var).pack(side="left")
+        ParagonLabel(rh, text="Host", style="muted", anchor="w").pack(side="left", padx=(12, 2))
+        self.host_e = ParagonEntry(rh, width=150, height=36)
+        self.host_e.insert(0, pconfig_get("agent_home_host", ""))
+        self.host_e.pack(side="left", padx=(0, 8))
+        ParagonLabel(rh, text="PIN", style="muted", anchor="w").pack(side="left", padx=(4, 2))
+        self.pin_e = ParagonEntry(rh, width=90, height=36, show="•")
+        self.pin_e.insert(0, pconfig_get("agent_home_pin", ""))
+        self.pin_e.pack(side="left", padx=(0, 8))
+        ParagonButton(rh, text="CONNECT", width=110, height=36,
+                      command=self._connect_home).pack(side="left")
+
         # System prompt
         ParagonLabel(inner, text="System prompt", style="muted").pack(anchor="w", padx=16, pady=(6, 2))
         self.sys_e = ctk.CTkTextbox(inner, height=56, fg_color=ParagonTheme.BG_TERTIARY, border_width=0)
@@ -18145,6 +18319,61 @@ class VoiceAgentDialog(ctk.CTkToplevel):
 
     def _engine(self):
         return "chatterbox" if (pconfig_get("tts_engine", "Chatterbox") or "").lower() == "chatterbox" else "xtts"
+
+    def _make_home_client(self):
+        host = self.host_e.get().strip()
+        if not host:
+            return None
+        return ParagonHomeClient(host, pconfig_get("agent_home_port", 8778),
+                                 self.pin_e.get().strip())
+
+    def _connect_home(self):
+        pconfig_set(agent_home_host=self.host_e.get().strip(),
+                    agent_home_pin=self.pin_e.get().strip(),
+                    agent_home_enabled=bool(self.home_var.get()))
+        client = self._make_home_client()
+        if client is None:
+            self._set_status("Enter the Paragon Home host (IP).")
+            return
+        self._set_status("Connecting to Paragon Home…")
+
+        def run():
+            ok, msg, info = client.connect()
+
+            def show():
+                self._set_status(msg)
+                if ok:
+                    self._home_client = client
+                    self._home_info = info
+                    self.home_var.set(True)
+                    extra = ("\n\nDevices: " + ", ".join(info.get("devices", [])[:12])) \
+                        if info.get("devices") else ""
+                    messagebox.showinfo("Paragon Home", msg + extra, parent=self)
+                else:
+                    messagebox.showwarning(
+                        "Paragon Home",
+                        "Couldn't connect:\n" + msg + "\n\nMake sure Paragon Home's remote "
+                        "API is enabled (port 8778) and the PIN is correct.", parent=self)
+            try:
+                self.after(0, show)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def _home_grounding(self):
+        info = self._home_info or {}
+        if not (info.get("devices") or info.get("scenes") or info.get("sequences")):
+            return ""
+        lines = ["You can control the smart home using the provided tools. Use a tool when "
+                 "the user asks to change lights, run a scene, or run a sequence, then confirm "
+                 "in one short sentence. Only use names from these lists:"]
+        if info.get("devices"):
+            lines.append("Devices/lights: " + ", ".join(info["devices"]))
+        if info.get("scenes"):
+            lines.append("Scenes: " + ", ".join(info["scenes"]))
+        if info.get("sequences"):
+            lines.append("Sequences: " + ", ".join(info["sequences"]))
+        return "\n".join(lines)
 
     def _agent_voice_options(self):
         if self._engine() == "chatterbox":
@@ -18424,9 +18653,12 @@ class VoiceAgentDialog(ctk.CTkToplevel):
             builtin = mode   # a named XTTS studio voice
         exaggeration = 0.5 if engine == "chatterbox" else None
 
+        home_on = bool(self.home_var.get())
         self._set_status("Transcribing…")
         pconfig_set(agent_model=model, agent_whisper=wmodel, agent_system=sys_prompt,
-                    agent_voice=mode, agent_speaker_wav=self.sample_e.get().strip())
+                    agent_voice=mode, agent_speaker_wav=self.sample_e.get().strip(),
+                    agent_home_enabled=home_on, agent_home_host=self.host_e.get().strip(),
+                    agent_home_pin=self.pin_e.get().strip())
 
         def run():
             import queue, tempfile
@@ -18498,15 +18730,53 @@ class VoiceAgentDialog(ctk.CTkToplevel):
                 if not heard:
                     raise RuntimeError("no speech detected")
                 self.after(0, lambda: (self._append("You", heard), self._set_status("Thinking…")))
+
+                # Smart-home: lazily connect, ground the prompt, enable tools.
+                client = self._home_client
+                if home_on and client is None:
+                    c = self._make_home_client()
+                    if c:
+                        ok, _, info = c.connect()
+                        if ok:
+                            self._home_client = c
+                            self._home_info = info
+                            client = c
+                tools = HOME_TOOLS if (home_on and client is not None) else None
+                grounding = self._home_grounding() if tools else ""
+                self.messages[0]["content"] = sys_prompt + (("\n\n" + grounding) if grounding else "")
+
                 self.messages.append({"role": "user", "content": heard})
-                reply = ollama_chat_stream(self.messages, url, model, on_delta=feed)
+                reply, tool_calls = ollama_chat_stream(self.messages, url, model,
+                                                       on_delta=feed, tools=tools)
+                if tool_calls and client is not None:
+                    self.messages.append({"role": "assistant", "content": reply,
+                                          "tool_calls": tool_calls})
+                    done_notes = []
+                    for tc in tool_calls:
+                        fn = (tc.get("function") or {})
+                        fname = fn.get("name", "")
+                        fargs = fn.get("arguments") or {}
+                        if isinstance(fargs, str):
+                            try:
+                                fargs = json.loads(fargs)
+                            except Exception:
+                                fargs = {}
+                        res = exec_home_tool(client, fname, fargs)
+                        done_notes.append(res)
+                        self.messages.append({"role": "tool", "name": fname, "content": res})
+                    self.after(0, lambda n=list(done_notes): self._append("Home", "; ".join(n)))
+                    # Follow-up: let the model phrase a short spoken confirmation.
+                    reply, _ = ollama_chat_stream(self.messages, url, model, on_delta=feed)
+                    self.messages.append({"role": "assistant", "content": reply})
+                    self.after(0, lambda: self._append(self.AGENT_NAME, reply))
+                else:
+                    if not reply:
+                        raise RuntimeError("empty reply from Ollama")
+                    self.messages.append({"role": "assistant", "content": reply})
+                    self.after(0, lambda: self._append(self.AGENT_NAME, reply))
                 tail = buf["s"].strip()
                 if tail:
                     synth_q.put(tail)          # flush any text with no final punctuation
-                if not reply:
-                    raise RuntimeError("empty reply from Ollama")
-                self.messages.append({"role": "assistant", "content": reply})
-                self.after(0, lambda: self._append(self.AGENT_NAME, reply))
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
 
