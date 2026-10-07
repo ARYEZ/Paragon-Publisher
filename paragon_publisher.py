@@ -3074,6 +3074,10 @@ class ParagonHomeClient:
     """Minimal client for Paragon Home's local HTTP control API (remote.py),
     which runs in Kodi's service on port 8778 and is gated by a 6-digit PIN."""
 
+    # The server guards every /api route with a custom header (its CSRF defence);
+    # a request without it is refused with 403 before anything else runs.
+    GUARD_HEADER = "X-Paragon-Remote"
+
     def __init__(self, host, port=8778, pin=""):
         self.base = f"http://{host}:{int(port)}"
         self.pin = (pin or "").strip()
@@ -3082,7 +3086,8 @@ class ParagonHomeClient:
     def _login(self):
         data = json.dumps({"pin": self.pin}).encode("utf-8")
         req = urllib.request.Request(self.base + "/api/login", data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json",
+                                              self.GUARD_HEADER: "1"})
         with urllib.request.urlopen(req, timeout=10) as r:
             sc = r.headers.get("Set-Cookie", "")
             self._cookie = sc.split(";", 1)[0] if sc else None
@@ -3092,7 +3097,7 @@ class ParagonHomeClient:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
 
         def _do():
-            hdr = {"Content-Type": "application/json"}
+            hdr = {"Content-Type": "application/json", self.GUARD_HEADER: "1"}
             if self._cookie:
                 hdr["Cookie"] = self._cookie
             req = urllib.request.Request(self.base + path, data=data,
